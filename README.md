@@ -273,6 +273,31 @@ here for review, same as the algorithm-level scope note below.
    ready to be localized -- no code changes needed for that, just more
    columns in the JSON.
 
+   **Iteration 5 -- buttons were visible but unclickable; root rect was
+   likely clipping hit-testing.** Live test: the strip rendered correctly
+   (5 icons visible in the expected spot, confirmed by screenshot), but
+   clicking any of the 5 buttons produced no effect at all -- not even
+   `LogButtonStripRects`' unconditional debug log line, which only fires
+   once `OnUiMessage` sees an event with `target == "remote-stash-sorting"`.
+   15k+ lines of `debug_log_ui_messages` firehose from that test session
+   contained zero such lines, meaning the click never reached our
+   `ButtonWidget`s at all -- not a downstream logic bug. Leading suspect:
+   `StashTools`' own root `Widget` rect was `{ x: 0, y: 0, width: 1, height:
+   1 }` -- a 1x1 anchor point, sized that way on purpose since children can
+   render outside their parent's declared rect. Rendering apparently isn't
+   clipped to a parent's bounds, but *input hit-testing plausibly is* (a
+   common scene-graph pattern: descend into a child subtree only if the
+   click first falls within the parent's own rect) -- which would explain
+   visible-but-dead buttons exactly. Fix: widened the root rect to `{ x: 0,
+   y: 0, width: 110, height: 980 }`, covering every child button's actual
+   bounding box, **without changing its `x`/`y`** (child rects are local
+   offsets from the parent's `x`/`y` per `widgets.h`, so moving the parent's
+   position would have shifted every button on screen instead of just
+   fixing hit-testing). Unverified against the live game as of this
+   writing -- if buttons are still unclickable after this, the SDK's actual
+   hit-testing rule is something else and needs `debug_log_ui_messages`
+   again to find out what a click there *does* produce.
+
 7. **No confirmed way yet to show the buttons only while Shared Stash is
    open.** Requested behavior: the button strip should only appear when the
    Shared Stash is actually open, not for plain `PlayerInventory`. Nothing

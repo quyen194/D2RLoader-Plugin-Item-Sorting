@@ -1,6 +1,6 @@
 {
 	"type": "Widget", "name": "remote-stash-sorting/StashTools",
-	"fields": { "rect": { "x": 0, "y": 0, "width": 1, "height": 1 } },
+	"fields": { "rect": { "x": 0, "y": 0, "width": 110, "height": 980 } },
 	"children": [
 		{
 			"type": "ImageWidget", "name": "ButtonMold",
