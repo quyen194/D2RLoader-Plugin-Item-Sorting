@@ -1,0 +1,23 @@
+[
+	{ "Key": "AutoSortTooltip", "enUS": "Auto Sort" },
+	{ "Key": "AddBlankPageTooltip", "enUS": "Add Blank Page" },
+	{ "Key": "RemoveCurrentPageTooltip", "enUS": "Remove Current Page" },
+	{ "Key": "PrevTabTooltip", "enUS": "Previous Tab" },
+	{ "Key": "NextTabTooltip", "enUS": "Next Tab" },
+
+	{ "Key": "ToastTitle", "enUS": "Remote Stash Sorting" },
+	{ "Key": "MsgAutoSortOk", "enUS": "Auto Sort: done. See the plugin log for item/tab counts." },
+	{ "Key": "MsgAutoSortDisabled", "enUS": "Auto Sort: disabled in remote-stash-sorting.toml." },
+	{ "Key": "MsgAutoSortNotEnoughTabs", "enUS": "Auto Sort failed: not enough shared-stash tabs for the configured layout." },
+	{ "Key": "MsgAutoSortNoRoom", "enUS": "Auto Sort failed: a category needs more room than its reserved tabs." },
+	{ "Key": "MsgAutoSortSetNoRoom", "enUS": "Auto Sort failed: a set doesn't fit in its reserved tabs." },
+	{ "Key": "MsgAutoSortUnknownMode", "enUS": "Auto Sort failed: unknown category in remote-stash-sorting.toml." },
+	{ "Key": "MsgBlankMoved", "enUS": "Add Blank Page: moved the blank tab next to the selected tab." },
+	{ "Key": "MsgNoBlankTab", "enUS": "Add Blank Page failed: no empty tab found after the selected tab." },
+	{ "Key": "MsgPageRemoved", "enUS": "Remove Current Page: moved the empty tab to the end." },
+	{ "Key": "MsgCurrentNotEmpty", "enUS": "Remove Current Page failed: the selected tab is not empty." },
+	{ "Key": "MsgOutOfRange", "enUS": "Failed: the selected tab is out of range." },
+	{ "Key": "MsgMultiplayerClientUnsupported", "enUS": "Failed: item moves as a TCP/IP client aren't supported yet (host-only in this version)." },
+	{ "Key": "MsgTabSelected", "enUS": "Selected tab changed -- see the number below." },
+	{ "Key": "MsgInternalError", "enUS": "Failed: unexpected error. See the plugin log." }
+]

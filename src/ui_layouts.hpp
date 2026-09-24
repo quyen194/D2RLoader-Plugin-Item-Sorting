@@ -26,85 +26,47 @@ inline constexpr const char* kPluginId = "remote-stash-sorting";
 
 // ---------------------------------------------------------------------
 // Child layout: a small button strip attached to the stock PlayerInventory
-// panel (registerChildLayout(StockPanel::PlayerInventory, ...)). Shared
-// Stash is always opened alongside PlayerInventory, so this is visible
-// whenever there is a shared stash on screen to act on.
+// panel (registerChildLayout(StockPanel::PlayerInventory, localId
+// "StashTools")). Shared Stash is always opened alongside PlayerInventory,
+// so this is visible whenever there is a shared stash on screen to act on.
 //
-// Position is a first guess (top-left corner, stacked vertically) and very
-// likely needs adjusting once this is actually seen in-game -- there was no
-// way to verify stock PlayerInventory panel dimensions without a live D2R
-// session. See README "Known gaps".
-inline constexpr char kButtonsChildLayoutJson[] = R"json({
-	"type": "Widget", "name": "remote-stash-sorting/StashTools",
-	"fields": { "rect": { "x": 0, "y": 0, "width": 1, "height": 1 } },
-	"children": [
-		{
-			"type": "ButtonWidget", "name": "AutoSortButton",
-			"fields": {
-				"rect": { "x": 4, "y": 4 },
-				"filename": "Panel\\Modals\\ModalButton",
-				"focusIndicatorFilename": "Controller/HoverImages/ModalButton_Hover",
-				"pressedFrame": 1, "disabledFrame": 2, "hoveredFrame": 3,
-				"textString": "Auto Sort",
-				"pointSize": "$SmallFontSize",
-				"textColor": "$FontColorWhite",
-				"onClickMessage": "remote-stash-sorting:AutoSort"
-			}
-		},
-		{
-			"type": "ButtonWidget", "name": "AddBlankPageButton",
-			"fields": {
-				"rect": { "x": 4, "y": 38 },
-				"filename": "Panel\\Modals\\ModalButton",
-				"focusIndicatorFilename": "Controller/HoverImages/ModalButton_Hover",
-				"pressedFrame": 1, "disabledFrame": 2, "hoveredFrame": 3,
-				"textString": "Add Blank Page",
-				"pointSize": "$SmallFontSize",
-				"textColor": "$FontColorWhite",
-				"onClickMessage": "remote-stash-sorting:AddBlankPage"
-			}
-		},
-		{
-			"type": "ButtonWidget", "name": "RemoveCurrentPageButton",
-			"fields": {
-				"rect": { "x": 4, "y": 72 },
-				"filename": "Panel\\Modals\\ModalButton",
-				"focusIndicatorFilename": "Controller/HoverImages/ModalButton_Hover",
-				"pressedFrame": 1, "disabledFrame": 2, "hoveredFrame": 3,
-				"textString": "Remove Current Page",
-				"pointSize": "$SmallFontSize",
-				"textColor": "$FontColorWhite",
-				"onClickMessage": "remote-stash-sorting:RemoveCurrentPage"
-			}
-		},
-		{
-			"type": "ButtonWidget", "name": "PrevTabButton",
-			"fields": {
-				"rect": { "x": 4, "y": 110 },
-				"filename": "Panel\\Modals\\ModalButton",
-				"focusIndicatorFilename": "Controller/HoverImages/ModalButton_Hover",
-				"pressedFrame": 1, "disabledFrame": 2, "hoveredFrame": 3,
-				"textString": "< Tab",
-				"pointSize": "$SmallFontSize",
-				"textColor": "$FontColorWhite",
-				"onClickMessage": "remote-stash-sorting:SelectPrevTab"
-			}
-		},
-		{
-			"type": "ButtonWidget", "name": "NextTabButton",
-			"fields": {
-				"rect": { "x": 78, "y": 110 },
-				"filename": "Panel\\Modals\\ModalButton",
-				"focusIndicatorFilename": "Controller/HoverImages/ModalButton_Hover",
-				"pressedFrame": 1, "disabledFrame": 2, "hoveredFrame": 3,
-				"textString": "Tab >",
-				"pointSize": "$SmallFontSize",
-				"textColor": "$FontColorWhite",
-				"onClickMessage": "remote-stash-sorting:SelectNextTab"
-			}
-		}
-	]
-})json";
+// Unlike the toast panel below, this layout is fully static (fixed
+// coordinates, fixed sprite references, fixed tooltip keys -- nothing
+// computed at runtime), so as of iteration 4 it is a real file, not a C++
+// string constant:
+//
+//   d2rl-remote-stash-sorting.mpq/data/global/ui/layouts/remote-stash-sorting/StashToolshd.json
+//
+// matching the "data/global/ui/layouts/<plugin-id>/<local-id>hd.json"
+// convention the PluginSDK README documents, and matching how
+// d2rl-charm-inv.mpq ships its own InventoryButtonhd.json. D2RCore resolves
+// it from the companion .mpq folder beside the DLL on its own -- plugin.cpp
+// no longer calls ResourceService::registerResource for it, only
+// PanelService::registerChildLayout to attach it. Its tooltipStrings
+// reference "@remote-stash-sorting:<Key>" entries defined in
+// d2rl-remote-stash-sorting.mpq/data/local/lng/strings/d2rloader/remote-stash-sorting/strings.json
+// (see PluginSDK README "Resources and Companion MPQs" -- confirmed
+// supported for tooltipString, not just TextBoxWidget text, by
+// d2rl-charm-inv's own CloseButton: "tooltipString": "@d2r:strClose").
+//
+// Position/size, iteration 3 (see README "Known gaps" #6): reuses the exact
+// sprites and edge position the d2rl-charm-inv plugin already ships and
+// proves safe in practice -- button_mold.sprite (the small "pouch"
+// background) and charminvbutton.sprite (a compact icon button). charm-inv
+// attaches its own toggle button at
+// { x: 3, y: 672, width: 54, height: 141 } on this exact same
+// StockPanel::PlayerInventory child-layout coordinate space, so that spot is
+// known-good, empty real estate -- not a guess. Auto Sort reuses that exact
+// spot (with the mold graphic behind it, like charm-inv's own button); the
+// other four actions stack directly below the mold as plain icon buttons
+// with no textString (there is no room for a text label at this size, and
+// no "set widget text" SDK call anyway -- see file comment above), each
+// with a tooltipString identifying it on hover instead.
+//
+// Still placeholder in one sense: all five buttons currently use the same
+// generic charminvbutton icon (only distinguishable by tooltip). Swap in
+// purpose-made icons once the position itself is confirmed working
+// in-game -- edit the JSON file directly, no rebuild needed.
 
 // ---------------------------------------------------------------------
 // Toast panel: the plugin's own result notification, per the user's explicit
@@ -152,28 +114,6 @@ inline const char* OutcomeMessageWidgetName(OutcomeMessage msg) {
 	return "MsgInternalError";
 }
 
-inline const char* OutcomeMessageText(OutcomeMessage msg) {
-	switch (msg) {
-		case OutcomeMessage::AutoSortOk: return "Auto Sort: done. See the plugin log for item/tab counts.";
-		case OutcomeMessage::AutoSortDisabled: return "Auto Sort: disabled in remote-stash-sorting.toml.";
-		case OutcomeMessage::AutoSortNotEnoughTabs: return "Auto Sort failed: not enough shared-stash tabs for the configured layout.";
-		case OutcomeMessage::AutoSortNoRoom: return "Auto Sort failed: a category needs more room than its reserved tabs.";
-		case OutcomeMessage::AutoSortSetNoRoom: return "Auto Sort failed: a set doesn't fit in its reserved tabs.";
-		case OutcomeMessage::AutoSortUnknownMode: return "Auto Sort failed: unknown category in remote-stash-sorting.toml.";
-		case OutcomeMessage::BlankMoved: return "Add Blank Page: moved the blank tab next to the selected tab.";
-		case OutcomeMessage::NoBlankTab: return "Add Blank Page failed: no empty tab found after the selected tab.";
-		case OutcomeMessage::PageRemoved: return "Remove Current Page: moved the empty tab to the end.";
-		case OutcomeMessage::CurrentNotEmpty: return "Remove Current Page failed: the selected tab is not empty.";
-		case OutcomeMessage::OutOfRange: return "Failed: the selected tab is out of range.";
-		case OutcomeMessage::MultiplayerClientUnsupported:
-			return "Failed: item moves as a TCP/IP client aren't supported yet (host-only in this version).";
-		case OutcomeMessage::TabSelected: return "Selected tab changed -- see the number below.";
-		case OutcomeMessage::InternalError:
-		case OutcomeMessage::Count: return "Failed: unexpected error. See the plugin log.";
-	}
-	return "Failed: unexpected error. See the plugin log.";
-}
-
 // Generous enough for any realistic shared-stash tab count; beyond this the
 // toast just shows "tab 24+" rather than growing the widget list further.
 inline constexpr uint32_t kMaxDisplayableTab = 23;
@@ -200,21 +140,32 @@ inline std::string BuildToastLayoutJson() {
 					"type": "TextBoxWidget", "name": "Heading",
 					"fields": {
 						"rect": { "x": 24, "y": 14, "width": 592, "height": 30 },
-						"text": "Remote Stash Sorting", "style": "$StyleSettingsTitle"
+						"text": "@remote-stash-sorting:ToastTitle", "style": "$StyleSettingsTitle"
 					}
 				},
 )json";
 
 	for (uint32_t i = 0; i < static_cast<uint32_t>(OutcomeMessage::Count); ++i) {
-		const auto msg = static_cast<OutcomeMessage>(i);
+		const auto msg      = static_cast<OutcomeMessage>(i);
+		const char* widgetName = OutcomeMessageWidgetName(msg);
 		json += "\t\t\t\t{ \"type\": \"TextBoxWidget\", \"name\": \"";
-		json += OutcomeMessageWidgetName(msg);
+		json += widgetName;
 		json += "\", \"fields\": { \"rect\": { \"x\": 24, \"y\": 52, \"width\": 592, \"height\": 60 }, \"visible\": false, "
-		        "\"text\": \"";
-		json += OutcomeMessageText(msg);
+		        "\"text\": \"@";
+		json += kPluginId;
+		json += ":";
+		// The widget name doubles as its strings.json Key -- see
+		// d2rl-remote-stash-sorting.mpq/data/local/lng/strings/d2rloader/
+		// remote-stash-sorting/strings.json (one entry per OutcomeMessage,
+		// named to match OutcomeMessageWidgetName exactly).
+		json += widgetName;
 		json += "\", \"style\": \"$StyleModalDialogDescription\" } },\n";
 	}
 
+	// Not localized/string-table-backed like the OutcomeMessage loop above --
+	// this is a bare number with an English "Selected tab: " prefix, and
+	// enumerating kMaxDisplayableTab+2 string-table keys just for that
+	// prefix isn't worth it. Revisit if that changes.
 	for (uint32_t t = 0; t <= kMaxDisplayableTab + 1; ++t) {
 		const bool  overflow = t == kMaxDisplayableTab + 1;
 		std::string label    = overflow ? "Selected tab: 24+" : ("Selected tab: " + std::to_string(t));

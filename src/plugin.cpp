@@ -43,7 +43,7 @@ constexpr PluginInfo kPluginInfo {
 	.name        = "Remote Stash Sorting",
 	.version     = "0.1.0",
 	.author      = "quyen19492",
-	.description = "Auto-sorts the shared stash and rotates blank tabs (ported from D2R-Reimagined-Save-Editor).",
+	.description = "Auto-sorts the shared stash and rotates blank tabs.",
 	.flags       = PluginFlags::Shared,
 };
 
@@ -74,6 +74,13 @@ struct Config {
 	uint32_t                                    gridHeight = 13;
 	uint32_t                                    tabCount   = 20;
 	std::vector<RemoteStashSorting::CategorySpec> layout;
+	// Debug aid for the "Known gaps" #6/#7 live-layout work: when true, every
+	// incoming UiMessageEvent (ours and every other plugin's/D2R's own) is
+	// logged as target/command, so the exact native message D2R fires when
+	// the Shared Stash panel opens/closes/switches tabs can be found by
+	// watching the log while toggling it in-game. Off by default -- this is
+	// a firehose, not something to leave on.
+	bool                                        debugLogUiMessages = false;
 };
 
 Config g_config;
@@ -116,10 +123,11 @@ Config LoadConfig(const PluginContext* ctx) {
 	}
 
 	auto section = parsed["remote-stash-sorting"];
-	cfg.enabled    = section["enabled"].value_or(true);
-	cfg.tabCount   = section["shared_stash_tab_count"].value_or(20u);
-	cfg.gridWidth  = section["grid"]["width"].value_or(16u);
-	cfg.gridHeight = section["grid"]["height"].value_or(13u);
+	cfg.enabled            = section["enabled"].value_or(true);
+	cfg.tabCount           = section["shared_stash_tab_count"].value_or(20u);
+	cfg.gridWidth          = section["grid"]["width"].value_or(16u);
+	cfg.gridHeight         = section["grid"]["height"].value_or(13u);
+	cfg.debugLogUiMessages = section["debug_log_ui_messages"].value_or(false);
 
 	if (auto layoutArr = section["layout"].as_array()) {
 		std::vector<RemoteStashSorting::CategorySpec> parsedLayout;
@@ -202,7 +210,49 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 		.structSize    = Inventory::ItemFilterSize,
 		.containerMask = Items::ContainerBit(Items::ItemContainer::SharedStash),
 	};
-	return g_inventory->forEachInventoryItem(ctx, player, &filter, CollectSharedStashItem, state) == Inventory::Result::Success;
+	const bool ok = g_inventory->forEachInventoryItem(ctx, player, &filter, CollectSharedStashItem, state) == Inventory::Result::Success;
+
+	// Always-on diagnostic for "Known gaps" #8 -- the single biggest
+	// unverified assumption this whole plugin rests on: that
+	// forEachInventoryItem + ItemContainer::SharedStash enumerates every
+	// tab (disambiguated via ItemInfo::sharedStashPage), not just whichever
+	// tab is currently open on screen. Cheap (only runs when a button is
+	// clicked, not per-frame), so it stays on unconditionally rather than
+	// behind debug_log_ui_messages.
+	if (ok && ctx != nullptr && state != nullptr) {
+		std::vector<uint32_t> tabs;
+		tabs.reserve(state->facts.size());
+		for (const auto& fact : state->facts) {
+			tabs.push_back(fact.sharedStashPage);
+		}
+		std::sort(tabs.begin(), tabs.end());
+		tabs.erase(std::unique(tabs.begin(), tabs.end()), tabs.end());
+
+		std::string tabList;
+		for (size_t i = 0; i < tabs.size() && i < 40; ++i) {
+			if (!tabList.empty()) {
+				tabList += ",";
+			}
+			tabList += std::to_string(tabs[i]);
+		}
+		if (tabs.size() > 40) {
+			tabList += ",...";
+		}
+
+		char buf[512];
+		std::snprintf(
+			buf,
+			sizeof(buf),
+			"remote-stash-sorting: shared-stash scan: %zu item(s) across %zu distinct tab number(s) [%s]. If this "
+			"stays the SAME single tab number no matter which tab is open in-game when you click a button, "
+			"forEachInventoryItem is only returning the currently open tab, not every tab (see README Known gaps #8).",
+			state->facts.size(),
+			tabs.size(),
+			tabList.c_str());
+		ctx->LogInfo(buf);
+	}
+
+	return ok;
 }
 
 // --- Turning a plan into an item transaction --------------------------------
@@ -471,18 +521,80 @@ void __cdecl DoRemoveCurrentPage(const PluginContext* ctx, void*) noexcept {
 
 // --- UI message listener (button clicks) --------------------------------
 
+// Debug aid for "Known gaps" #6/#7: logs the live, engine-resolved rect of
+// the button strip and each of its five buttons. WidgetService::getWidgetRect
+// reports coordinates local to each widget's parent, so this is ground truth
+// from the engine instead of another screenshot-pixel guess. Called whenever
+// one of our own buttons is clicked (cheap -- user-triggered, not per-frame).
+void LogButtonStripRects(const PluginContext* ctx) {
+	if (ctx == nullptr || g_widgets == nullptr) {
+		return;
+	}
+
+	Widgets::WidgetHandle root = Widgets::InvalidHandle;
+	if (g_widgets->findPanel(ctx, "remote-stash-sorting/StashTools", &root) != Widgets::Result::Success) {
+		ctx->LogInfo("remote-stash-sorting: debug: could not find the StashTools root widget via findPanel.");
+		return;
+	}
+
+	Widgets::Rect rootRect {};
+	if (g_widgets->getWidgetRect(ctx, root, &rootRect) == Widgets::Result::Success) {
+		char buf[160];
+		std::snprintf(buf, sizeof(buf), "remote-stash-sorting: debug: StashTools rect (local to PlayerInventory) = x=%d y=%d w=%d h=%d",
+		               rootRect.x, rootRect.y, rootRect.width, rootRect.height);
+		ctx->LogInfo(buf);
+	} else {
+		ctx->LogInfo("remote-stash-sorting: debug: getWidgetRect failed for StashTools root.");
+	}
+
+	static constexpr const char* kButtonNames[] = {
+		"AutoSortButton", "AddBlankPageButton", "RemoveCurrentPageButton", "PrevTabButton", "NextTabButton",
+	};
+	for (const char* name : kButtonNames) {
+		Widgets::WidgetHandle w = Widgets::InvalidHandle;
+		if (g_widgets->findWidget(ctx, root, name, &w) != Widgets::Result::Success) {
+			continue;
+		}
+		Widgets::Rect r {};
+		if (g_widgets->getWidgetRect(ctx, w, &r) == Widgets::Result::Success) {
+			char buf[160];
+			std::snprintf(buf, sizeof(buf), "remote-stash-sorting: debug: %s rect (local to StashTools) = x=%d y=%d w=%d h=%d",
+			               name, r.x, r.y, r.width, r.height);
+			ctx->LogInfo(buf);
+		}
+	}
+}
+
 auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessageEvent* event, void*) noexcept -> SharedEvents::UiMessageAction {
 	namespace UiLayouts = RemoteStashSorting::UiLayouts;
 
 	if (ctx == nullptr || event == nullptr || event->structSize < SharedEvents::UiMessageEventRequiredSize) {
 		return SharedEvents::UiMessageAction::Continue;
 	}
+
+	// Debug aid for "Known gaps" #6/#7: with debug_log_ui_messages = true in
+	// the config, log every message this listener sees -- ours, every other
+	// plugin's, and D2R's own native panel/button messages -- so the exact
+	// target/command D2R fires when Shared Stash opens, closes, or switches
+	// tabs can be found by watching the log while using the stash in-game.
+	// Off by default; this fires on essentially every UI click in the game.
+	if (g_config.debugLogUiMessages) {
+		char buf[256];
+		std::snprintf(buf, sizeof(buf), "remote-stash-sorting: debug: UiMessage target=\"%s\" command=\"%s\" text=\"%s\"",
+		               event->target != nullptr ? event->target : "(null)",
+		               event->command != nullptr ? event->command : "(null)",
+		               event->text != nullptr ? event->text : "(null)");
+		ctx->LogInfo(buf);
+	}
+
 	if (event->target == nullptr || event->command == nullptr) {
 		return SharedEvents::UiMessageAction::Continue;
 	}
 	if (std::strcmp(event->target, UiLayouts::kPluginId) != 0) {
 		return SharedEvents::UiMessageAction::Continue;
 	}
+
+	LogButtonStripRects(ctx);
 
 	if (std::strcmp(event->command, "AutoSort") == 0) {
 		if (!g_config.enabled) {
@@ -562,19 +674,16 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 
 	g_config = LoadConfig(context);
 
-	// Button strip, attached to the stock PlayerInventory panel.
-	const Resources::ResourceRegistration buttonsResource {
-		.structSize = Resources::ResourceRegistrationSize,
-		.path       = "data/global/ui/layouts/remote-stash-sorting/StashToolshd.json",
-		.bytes      = UiLayouts::kButtonsChildLayoutJson,
-		.byteCount  = sizeof(UiLayouts::kButtonsChildLayoutJson) - 1,
-	};
-	Resources::RegistrationHandle buttonsResourceHandle = Resources::InvalidHandle;
-	if (g_resources->registerResource(context, &buttonsResource, &buttonsResourceHandle) != Resources::Result::Success) {
-		context->LogError("remote-stash-sorting: could not register the button-strip layout resource.");
-		return false;
-	}
-
+	// Button strip, attached to the stock PlayerInventory panel. Its JSON
+	// (coordinates, sprite references, tooltip string-table keys) and its
+	// button_mold/charminvbutton sprites all live as real files in the
+	// d2rl-remote-stash-sorting.mpq companion folder beside this DLL now
+	// (see ui_layouts.hpp "Child layout" comment) -- D2RCore discovers a
+	// "d2rl-<plugin-id>.mpq" companion and its
+	// "data/global/ui/layouts/<plugin-id>/<local-id>hd.json" layout on its
+	// own (see PluginSDK README "Resources and Companion MPQs" and
+	// CMakeLists.txt), so no ResourceService::registerResource call is
+	// needed here for it -- just attach it by localId below.
 	const Panels::ChildLayoutRegistration buttonsRegistration {
 		.structSize = Panels::ChildLayoutRegistrationSize,
 		.stockPanel = Panels::StockPanel::PlayerInventory,

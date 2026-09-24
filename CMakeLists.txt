@@ -55,6 +55,15 @@ target_link_libraries(RemoteStashSorting PRIVATE
 	tomlplusplus::tomlplusplus
 )
 
+# D2RCore looks beside each plugin DLL for a companion "d2rl-<plugin-id>.mpq"
+# (see PluginSDK README "Resources and Companion MPQs"), matched by the DLL's
+# own name: "d2rl-<plugin-id>.dll". kPluginId is "remote-stash-sorting", so
+# both must be renamed off the CMake target's default "RemoteStashSorting"
+# name to line up -- see the companion folder below.
+set_target_properties(RemoteStashSorting PROPERTIES
+	OUTPUT_NAME "d2rl-remote-stash-sorting"
+)
+
 d2rlplugin_embed_config(
 	TARGET RemoteStashSorting
 	FILE "${CMAKE_CURRENT_SOURCE_DIR}/remote-stash-sorting.toml"
@@ -62,28 +71,54 @@ d2rlplugin_embed_config(
 
 # --- Local "ready to copy" deploy folder ------------------------------------
 # Every build (Debug or Release, from VS Code or the command line) mirrors
-# the freshly built DLL into deploy/d2rloader/plugins. The whole deploy/
-# d2rloader folder can then be dragged straight into <game>/d2rloader. This
-# is also the exact folder the release workflow zips up for GitHub Releases
-# (see .github/workflows/release.yml) -- one definition of "what a deployed
+# the freshly built DLL (and its companion .mpq folder, see below) into
+# deploy/d2rloader/plugins. The whole deploy/d2rloader folder can then be
+# dragged straight into <game>/d2rloader. This is also the exact folder the
+# release workflow zips up for GitHub Releases (see
+# .github/workflows/release.yml) -- one definition of "what a deployed
 # plugin looks like", used by both local builds and CI.
 set(RSS_DEPLOY_PLUGINS_DIR "${CMAKE_SOURCE_DIR}/deploy/d2rloader/plugins")
 add_custom_command(TARGET RemoteStashSorting POST_BUILD
 	COMMAND "${CMAKE_COMMAND}" -E make_directory "${RSS_DEPLOY_PLUGINS_DIR}"
 	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:RemoteStashSorting>" "${RSS_DEPLOY_PLUGINS_DIR}/"
-	COMMENT "Copying RemoteStashSorting.dll into deploy/d2rloader/plugins"
+	COMMENT "Copying $<TARGET_FILE_NAME:RemoteStashSorting> into deploy/d2rloader/plugins"
+	VERBATIM
+)
+
+# --- Companion "d2rl-remote-stash-sorting.mpq" resource folder --------------
+# Reference button sprites (see README "Known gaps" #6), copied from the
+# working d2rl-charm-inv plugin's own button_mold.sprite / charminvbutton
+# .sprite -- its own proven example of a small button attached to the edge
+# of the PlayerInventory panel instead of overlapping the paperdoll. This
+# folder is a dev-mode companion MPQ (README: "During development, the
+# companion may be a folder. Use a packed MPQ for release."), structured
+# exactly like d2rl-charm-inv.mpq:
+#   d2rl-remote-stash-sorting.mpq/data/hd/global/ui/d2rloader/remote-stash-sorting/*.sprite
+#   d2rl-remote-stash-sorting.mpq/data/d2rloader/compiler/table-schemas.json
+# D2RCore discovers it on its own (it just looks beside the DLL for this
+# exact folder/file name) -- no ResourceService registration needed in
+# plugin.cpp, unlike the JSON panel layouts, which stay runtime-registered
+# because the toast layout is built dynamically. ui_layouts.hpp's
+# "filename": "d2rloader/remote-stash-sorting/button_mold" (etc.) references
+# work unchanged regardless of how the sprite bytes actually arrive.
+set(RSS_MPQ_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/d2rl-remote-stash-sorting.mpq")
+add_custom_command(TARGET RemoteStashSorting POST_BUILD
+	COMMAND "${CMAKE_COMMAND}" -E copy_directory "${RSS_MPQ_SOURCE_DIR}" "${RSS_DEPLOY_PLUGINS_DIR}/d2rl-remote-stash-sorting.mpq"
+	COMMENT "Copying d2rl-remote-stash-sorting.mpq into deploy/d2rloader/plugins"
 	VERBATIM
 )
 
 # Optional convenience: point this at your D2R install to also copy the
-# freshly built DLL straight into the real game's plugins folder on every
-# build, e.g. a CMakeUserPresets.json cacheVariables entry or:
+# freshly built DLL and its companion .mpq folder straight into the real
+# game's plugins folder on every build, e.g. a CMakeUserPresets.json
+# cacheVariables entry or:
 #   cmake --preset debug -DD2RLOADER_GAME_DIR=D:/Games/DiabloII-Resurrected
 if(DEFINED D2RLOADER_GAME_DIR)
 	add_custom_command(TARGET RemoteStashSorting POST_BUILD
 		COMMAND "${CMAKE_COMMAND}" -E make_directory "${D2RLOADER_GAME_DIR}/d2rloader/plugins"
 		COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:RemoteStashSorting>" "${D2RLOADER_GAME_DIR}/d2rloader/plugins/"
-		COMMENT "Copying RemoteStashSorting.dll into ${D2RLOADER_GAME_DIR}/d2rloader/plugins"
+		COMMAND "${CMAKE_COMMAND}" -E copy_directory "${RSS_MPQ_SOURCE_DIR}" "${D2RLOADER_GAME_DIR}/d2rloader/plugins/d2rl-remote-stash-sorting.mpq"
+		COMMENT "Copying $<TARGET_FILE_NAME:RemoteStashSorting> and its companion .mpq into ${D2RLOADER_GAME_DIR}/d2rloader/plugins"
 		VERBATIM
 	)
 endif()

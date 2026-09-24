@@ -190,21 +190,111 @@ here for review, same as the algorithm-level scope note below.
    The "selected tab: N" readout gets the same enumerated-widget treatment
    since its range is small and bounded (0..23, plus an overflow variant).
 
-6. **Button-strip position is an untested first guess.** `registerChildLayout`
-   attaches `ui_layouts.hpp`'s `kButtonsChildLayoutJson` to
-   `StockPanel::PlayerInventory`, at hand-picked pixel offsets, because
-   there was no way to see the actual stock `PlayerInventory` layout without
-   a live D2R session. **Check this first** after building -- the buttons
-   may overlap stock UI and need repositioning.
+6. **Button-strip position/appearance, iteration 3 -- reusing a known-good
+   spot and sprites instead of guessing.** `registerChildLayout` attaches
+   `ui_layouts.hpp`'s `kButtonsChildLayoutJson` to
+   `StockPanel::PlayerInventory` -- the *only* stock panel this SDK exposes
+   to `registerChildLayout` (`Panels::StockPanel` has no `SharedStash`
+   value), so the buttons can only ever live somewhere inside the
+   `PlayerInventory` panel, never inside the Stash panel's own layout --
+   that panel simply isn't an attachable target with this SDK version.
+   Iteration 1 shipped with no explicit button `width`/`height`, so every
+   button fell back to the native (large, modal-dialog-sized)
+   `Panel\Modals\ModalButton` sprite size and all five visually stacked
+   into one oversized, overlapping bar. Iteration 2 gave every button an
+   explicit compact size but left position at `x=4,y=4` (top-left),
+   unchanged and still overlapping the equipped-items paperdoll -- picking a
+   truly empty spot inside `PlayerInventory` from screenshots alone took
+   multiple guess-and-check rounds. Iteration 3 stops guessing: it copies
+   `button_mold.sprite` and `charminvbutton.sprite` from the working
+   `d2rl-charm-inv` plugin (its own small button attached to the edge of
+   `PlayerInventory`) into a companion resource folder,
+   `d2rl-remote-stash-sorting.mpq/data/hd/global/ui/d2rloader/remote-stash-sorting/`,
+   structured exactly like `d2rl-charm-inv.mpq` itself (PluginSDK README
+   "Resources and Companion MPQs": "D2RCore looks beside each plugin DLL for
+   `d2rl-<plugin-id>.mpq`" -- a folder during development, a packed MPQ for
+   release). Matching that convention required renaming the built DLL from
+   `RemoteStashSorting.dll` to `d2rl-remote-stash-sorting.dll` (see
+   `CMakeLists.txt`'s `OUTPUT_NAME`); **if you already have the old-named DLL
+   in `<game>/d2rloader/plugins/`, delete it** so the plugin doesn't load
+   twice under two different filenames. D2RCore discovers the companion
+   folder on its own, purely by that filename convention. Auto Sort now sits
+   at `{ x: 3, y: 672, width: 54, height: 141 }` with the mold graphic
+   behind it, the *exact* spot `d2rl-charm-inv` already proves is empty on
+   this same `PlayerInventory` child-layout coordinate space -- known-good,
+   not a guess. The other four buttons stack directly below the mold as
+   plain `charminvbutton` icon buttons (48x48/44x44, explicit sizes to avoid
+   repeating the iteration-1 overlap regardless of the sprite's real native
+   frame size). This is still a placeholder look (all five share one icon,
+   distinguishable only by tooltip) meant to get the button strip clickable
+   and off the paperdoll; `LogButtonStripRects` (see `plugin.cpp`) still
+   logs the engine-resolved rect of the strip and every button via
+   `WidgetService::getWidgetRect` whenever one is clicked, to confirm this
+   iteration's numbers against the live game.
 
-7. **`forEachInventoryItem` + `ItemContainer::SharedStash` is assumed to
+   **Iteration 4 -- the layout JSON and its text moved out of C++ too.**
+   Iteration 3 still built the button-strip JSON as a C++ string constant
+   (`kButtonsChildLayoutJson` in `ui_layouts.hpp`) and registered it at
+   runtime via `ResourceService::registerResource`, even though `d2rl-charm-inv`
+   itself ships its equivalent layout as a plain file
+   (`InventoryButtonhd.json`) inside its companion `.mpq`. Since the button
+   strip has no runtime-computed content (fixed coordinates, fixed sprite
+   references, fixed tooltips) -- unlike the toast panel, which genuinely
+   needs to be built at runtime for its enumerated per-outcome/per-tab
+   widgets -- there was no reason to keep it in code. It is now a real file:
+   `d2rl-remote-stash-sorting.mpq/data/global/ui/layouts/remote-stash-sorting/StashToolshd.json`,
+   matching `data/global/ui/layouts/<plugin-id>/<local-id>hd.json` (the
+   exact convention the PluginSDK README documents and `d2rl-charm-inv.mpq`
+   itself uses). `plugin.cpp` no longer calls `registerResource` for it at
+   all -- `registerChildLayout(StockPanel::PlayerInventory, "StashTools")`
+   is enough; D2RCore resolves the file from the companion `.mpq` on its
+   own, the same way it already resolved the sprites. Every button's
+   `tooltipString` also stopped being a hardcoded English literal and now
+   references a string-table key, e.g. `"@remote-stash-sorting:AutoSortTooltip"`,
+   defined in a new
+   `d2rl-remote-stash-sorting.mpq/data/local/lng/strings/d2rloader/remote-stash-sorting/strings.json`
+   (confirmed supported on `tooltipString`, not just `TextBoxWidget` `text`,
+   by `d2rl-charm-inv`'s own `CloseButton`: `"tooltipString": "@d2r:strClose"`).
+   The toast panel's 14 outcome messages (`ui_layouts.hpp`'s
+   `OutcomeMessage`) moved the same way -- `BuildToastLayoutJson()` still
+   builds the panel JSON at runtime (still registered via
+   `registerResource`, since the *set* of visible widgets is still dynamic),
+   but each message's `text` is now `"@remote-stash-sorting:MsgAutoSortOk"`
+   etc. instead of an embedded English sentence, resolved against the same
+   `strings.json`. Net effect: every piece of *content* this plugin
+   currently shows the player -- coordinates, sprite filenames, tooltip
+   text, and toast wording -- now lives in `d2rl-remote-stash-sorting.mpq/`
+   as editable JSON, not baked into the DLL; only genuinely dynamic
+   structure (which toast widgets are visible, which tab number is shown)
+   still goes through C++. `strings.json` currently only has an `enUS` entry
+   per key -- add the other language columns `d2rl-charm-inv`'s own
+   `strings.json` uses (`zhTW`, `deDE`, `esES`, `frFR`, `itIT`, `koKR`,
+   `plPL`, `esMX`, `jaJP`, `ptBR`, `ruRU`, `zhCN`) whenever this plugin is
+   ready to be localized -- no code changes needed for that, just more
+   columns in the JSON.
+
+7. **No confirmed way yet to show the buttons only while Shared Stash is
+   open.** Requested behavior: the button strip should only appear when the
+   Shared Stash is actually open, not for plain `PlayerInventory`. Nothing
+   in this SDK version documents the native message D2R fires when Shared
+   Stash opens/closes/switches tabs, and `Panels::StockPanel` has no
+   `SharedStash` value to query directly. Added a debug aid instead of
+   guessing: `debug_log_ui_messages = true` in the config makes
+   `OnUiMessage` log every `target`/`command`/`text` it sees (not just this
+   plugin's own) to the plugin log, so the real message can be found by
+   toggling Shared Stash in-game and reading the log, then filtered on and
+   used to drive `setWidgetVisible` on `StashTools` -- not implemented yet.
+   Until then the button strip is visible whenever `PlayerInventory` is
+   (i.e. also with plain inventory, no stash open).
+
+8. **`forEachInventoryItem` + `ItemContainer::SharedStash` is assumed to
    enumerate every tab, not just the open one.** This is the only way
    `ItemInfo::sharedStashPage` existing at all makes sense, and it's what
    the whole plugin depends on, but it hasn't been confirmed against a live
    game. If it turns out to only return the currently-open tab's items, Auto
    Sort would only ever see one tab's worth of items.
 
-8. **Multiplayer TCP/IP client: writes are host-only in v1.** A remote
+9. **Multiplayer TCP/IP client: writes are host-only in v1.** A remote
    client's `executeExistingItemTransaction` call returns
    `Items::Result::NotAuthoritative` (per `item.h`'s documented behavior);
    the plugin catches this and shows a clear "not supported yet as a
@@ -217,14 +307,14 @@ here for review, same as the algorithm-level scope note below.
    this as the most significant piece of unfinished work here, not a
    dropped requirement.
 
-9. **A plan over 4096 operations loses cross-chunk atomicity.**
+10. **A plan over 4096 operations loses cross-chunk atomicity.**
    `Items::MaxExistingItemOperations` caps one transaction at 4096; a plan
    larger than that (a near-maximally full, near-maximally sized stash) gets
    split into several transactions, each atomic on its own but not atomic as
    a whole. `ApplyMoves` logs a warning when this happens. Realistically
    rare (would need on the order of thousands of items in play at once).
 
-10. **The `unidentified` sort mode isn't ported.** The save-editor has one;
+11. **The `unidentified` sort mode isn't ported.** The save-editor has one;
     `DefaultLayout()` here mirrors the other ten `SS_AUTO_LAYOUT` entries
     only.
 
@@ -263,14 +353,22 @@ name). In VS Code's CMake Tools: select an MSVC kit, set
 `"cmake.generator": "Ninja"` in settings, pick the Release variant, build.
 
 **Local deploy folder:** every build (any config, VS Code or the command
-line) copies the freshly built DLL into `deploy/d2rloader/plugins/`
-(see the `RSS_DEPLOY_PLUGINS_DIR` custom command in `CMakeLists.txt`). The
+line) copies the freshly built DLL -- named `d2rl-remote-stash-sorting.dll`,
+not the CMake target's default `RemoteStashSorting.dll` (see
+`OUTPUT_NAME` in `CMakeLists.txt`; required so D2RCore's
+"`d2rl-<plugin-id>.mpq` beside the DLL" lookup finds the companion folder
+below) -- plus its companion `d2rl-remote-stash-sorting.mpq/` resource
+folder (the sprites from "Known gaps" #6) into `deploy/d2rloader/plugins/`
+(see the `RSS_DEPLOY_PLUGINS_DIR` custom commands in `CMakeLists.txt`). The
 whole `deploy/d2rloader` folder can be dragged straight into `<game>/`.
 `deploy/` is gitignored -- it is regenerated by every build, not committed.
 Optionally set `-DD2RLOADER_GAME_DIR=<path to your D2R install>` (e.g. in a
 local, gitignored `CMakeUserPresets.json`) to also have every build copy the
-DLL directly into `<D2RLOADER_GAME_DIR>/d2rloader/plugins/` for live
-testing, no manual copy step needed.
+DLL and its companion folder directly into
+`<D2RLOADER_GAME_DIR>/d2rloader/plugins/` for live testing, no manual copy
+step needed. **If you built this plugin before the DLL rename, delete the
+old `RemoteStashSorting.dll` from your `<game>/d2rloader/plugins/`** so it
+doesn't load twice under two different filenames.
 
 **GitHub Releases:** `.github/workflows/release.yml` builds Release/x64 and
 publishes a GitHub Release automatically, but only when you push a version

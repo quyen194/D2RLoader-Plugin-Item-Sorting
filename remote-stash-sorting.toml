@@ -21,6 +21,15 @@ shared_stash_tab_count = 200
 notification_channel = "toast"
 notification_seconds = 4 # reserved for a future auto-dismiss timer; unused in v1
 
+# Debug aid only -- leave false normally. When true, every UI message the
+# plugin's listener sees (ours, other plugins', and D2R's own native
+# panel/button messages) is written to the plugin log as target/command/text.
+# Turn this on, open/close/switch tabs on the Shared Stash in-game, then check
+# the log to find the exact native message D2R fires for those actions (there
+# is no documented list of them -- see README "Known gaps" #8). This is a
+# firehose (fires on almost every UI click), so turn it back off once done.
+debug_log_ui_messages = false
+
 # Grid size per shared-stash tab. 16x13 is confirmed from the
 # D2R-Reimagined-Save-Editor's renderSharedStashTabs; override here only if
 # live testing finds a mismatch for your game version.
