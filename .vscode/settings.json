@@ -1,0 +1,8 @@
+{
+  "cmake.generator": "Ninja",
+  "workbench.editorAssociations": {
+    "*.copilotmd": "vscode.markdown.preview.editor",
+    "*.xlsx": "default",
+    "*.sprite": "d2rmodding.spriteViewer"
+  }
+}

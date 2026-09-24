@@ -1,0 +1,65 @@
+# Builds RemoteStashSorting.dll (Release, x64) and publishes a GitHub Release
+# whenever a version tag is pushed, e.g.:
+#   git tag v0.1.0
+#   git push origin v0.1.0
+#
+# Ordinary commits/pushes to any branch do NOT trigger this workflow -- only
+# a pushed "v*" tag does, so Releases stay something you opt into.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      # Checked out as a sibling of PluginSDK below, mirroring the local
+      # D2RLoader-Plugins-Dev/{Remote-Stash-Sorting,PluginSDK} layout that
+      # CMakeLists.txt's `../PluginSDK` add_subdirectory() expects.
+      - name: Checkout Remote-Stash-Sorting
+        uses: actions/checkout@v4
+        with:
+          path: Remote-Stash-Sorting
+
+      - name: Checkout PluginSDK
+        uses: actions/checkout@v4
+        with:
+          repository: D2RLoader/PluginSDK
+          path: PluginSDK
+
+      - name: Set up MSVC (x64) dev environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        working-directory: Remote-Stash-Sorting
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        working-directory: Remote-Stash-Sorting
+        run: cmake --build build --config Release
+
+      # CMakeLists.txt's post-build step already copied RemoteStashSorting.dll
+      # into deploy/d2rloader/plugins/ -- zip that folder as-is so the
+      # Release asset is literally "extract into <game>/".
+      - name: Package deploy/d2rloader
+        working-directory: Remote-Stash-Sorting
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $zipName = "RemoteStashSorting-$tag.zip"
+          Compress-Archive -Path "deploy/d2rloader" -DestinationPath $zipName
+          echo "ZIP_PATH=Remote-Stash-Sorting/$zipName" >> $env:GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP_PATH }}
+          generate_release_notes: true
