@@ -1,0 +1,8 @@
+{
+	"type": "Panel",
+	"name": "remote-stash-sorting/ActionRemoveCurrentPage",
+	"fields": {
+		"rect": { "x": 0, "y": 0, "width": 1, "height": 1 }
+	},
+	"children": []
+}

@@ -1,5 +1,8 @@
 {
   "cmake.generator": "Ninja",
+  "cmake.configureArgs": [
+    "-DD2RLOADER_GAME_DIR=D:/Games/DiabloII-Resurrected/DiabloII-Resurrected"
+  ],
   "workbench.editorAssociations": {
     "*.copilotmd": "vscode.markdown.preview.editor",
     "*.xlsx": "default",

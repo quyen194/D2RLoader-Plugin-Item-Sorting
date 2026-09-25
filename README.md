@@ -142,16 +142,152 @@ These are the deliberate v1 scope decisions made while building this out.
 None of them were explicitly signed off by you beforehand -- flagging them
 here for review, same as the algorithm-level scope note below.
 
-1. **`RunAutoSort` does not borrow/sweep/pad.** Unlike the save-editor's
-   `_ssRunAutoSort`, this port does not borrow extra empty tabs when a
-   category overflows its quota, does not sweep foreign items out of a
-   target tab, and does not hand spare tabs to empty categories afterwards.
-   A category that doesn't fit in exactly its configured `min_tabs` fails
-   the whole run with a clear error instead of silently reflowing the
-   layout. Covers the common case (stash roughly following the canonical
-   layout already, or first-time sort with headroom); the
-   borrow/sweep/pad behaviors are follow-up work. (`sort_engine.cpp`,
-   `RunAutoSort` doc comment.)
+1. **`RunAutoSort` borrows, and the padding pass is now partially
+   ported.** A user reported hitting the borrow gap directly: a `min_tabs`
+   of 5 for `uniqueGear` read (correctly) as a *minimum reservation*, not
+   a hard cap, and the original port treated it as the latter -- failing
+   outright instead of growing into more tabs the way the save-editor's
+   `_ssRunAutoSort` / `_ssPrepareInPlaceSort` does. Ported: a category that
+   doesn't fit in its `min_tabs` now borrows one more tab at a time (from
+   right after its reserved run, up to the shared stash's last tab) and
+   retries, exactly mirroring `_ssPrepareInPlaceSort`'s incremental-borrow
+   loop -- only failing once the *entire* stash has no tab left to give it.
+   The category's actual span (reserved + borrowed) advances the cursor,
+   so later categories simply start further along, same as the
+   save-editor's reflow. Unlike the save-editor, this never needs to
+   physically relocate a tab's raw page content to make borrowed tabs
+   contiguous -- this plugin moves items individually via live
+   `ItemService` transactions, so a destination tab is just a number, not
+   a page-splicing constraint the save-editor's raw-byte editing has to
+   work around.
+   On top of that, a second requested pass (`RunAutoSortWithPadding` in
+   `sort_engine.cpp`) now ports the save-editor's `autosort.json`
+   blank-tab/padding config as a second layer on top of the plan above:
+   `compact_empty_tabs_first` (relabel already-empty tabs to the end of
+   the active range before sorting, mirroring
+   `_ssCompactEmptyTabsToEnd`), `add_empty_page_when` -- global and
+   per-category, mirroring `_ssWantsEmptyPage` -- (add one "breathing"
+   blank tab after a category once its last used tab is at least this %
+   full; `"never"`/`"always"`/a number, `"always"` and `0` are
+   equivalent), and `blank_tabs_at_start` (pull that many empty tabs to
+   the front of the active range after everything else is placed,
+   mirroring `_ssAddBlankTabsAtStart`). See "Config" above and
+   `remote-stash-sorting.toml`'s comments for the exact settings.
+   Deliberately **not** ported: the save-editor's pass-1 quota-shortfall
+   redistribution (its `padding: roundRobin|inOrder|off` setting, which
+   hands an empty category's unused `min_tabs` quota to others *after* the
+   fact) -- this plugin's `RunAutoSort` always reserves a category's full
+   `min_tabs` immediately even when it turns out empty, so there's no
+   shortfall left for a pass 1 to redistribute; an empty category already
+   ends up with `min_tabs` blank tabs left in place by the main sort
+   itself. Also not ported: the `profiles`/`activeProfile` convenience-
+   preset layer, `continueOnFailure`, `skipConfirm`, and sweeping foreign
+   items out of a target tab (the save-editor's `strayItems` handling).
+
+   **A first live run caught a real bug in this combined plan**: the same
+   item routinely gets moved more than once across phases (compacted into
+   a closed-up tab, then placed somewhere else entirely by the category
+   sort; or resettled again by a later padding/blank-tab rotation), and
+   `ExistingItemTransaction` rejects the *entire* chunk it's in with
+   `Result::InvalidArgument` if any item handle appears in it more than
+   once -- so the raw concatenation of all four phases' moves could fail
+   to commit anything at all (`committed 0/33361`, on a stash where the
+   individually-correct plan was 3537 items), even though
+   `DetectCollisions`'s self-check came back clean (it already dedupes to
+   each handle's final move for its own spatial check, which is exactly
+   what wasn't happening to what actually got sent). Fixed by collapsing
+   `RunAutoSortWithPadding`'s combined `plan.moves` to one move per item
+   handle -- keeping only its last occurrence -- right before returning,
+   so every handle the game sees appears exactly once regardless of how
+   many phases touched it and regardless of chunk boundaries. This also
+   cuts the real number of item-move operations substantially, since most
+   items no longer pay for an earlier phase's now-superseded move.
+   (`sort_engine.cpp`, end of `RunAutoSortWithPadding`; `plugin.cpp`,
+   `TryParseEmptyPageRule`/`LoadConfig`.)
+
+   **A second live run (after the commit fix above) surfaced the actual
+   cause of the sparse-page complaint that started this whole thread**:
+   `RunAutoSort` seeds each category's occupancy grid from every existing
+   item still sitting in its target tabs, so it never places its own item
+   on top of one that hasn't moved yet -- correct for a genuinely
+   unclassified/leftover item, which really never moves. But it was doing
+   the same for every OTHER item too, including ones that match a
+   *different* category in the very same `layout` and are themselves about
+   to get their own fresh move later in this same `RunAutoSort` call.
+   Combined with `compact_empty_tabs_first` -- which closes every gap in
+   the active range, so essentially the WHOLE STASH's pre-sort content
+   (every category mixed together) now sits contiguously right where the
+   *first* category in `layout` (`uniqueGear`) is about to place its own
+   items -- that first category ended up planning around nearly the
+   entire rest of the stash's clutter as if none of it would ever move,
+   forcing it to borrow tab after mostly-empty tab until it finally
+   escaped into genuinely untouched territory. This is exactly what the
+   screenshots showed: a page with one item and a wall of empty cells,
+   while a much later page in the same category still had items. A
+   synthetic stash built to match the user's real log (356 uniqueGear /
+   158 uniqueRingAmu / 95 rareRingAmu / 325 magicRingAmu / 19 uniqueCharm
+   / 299 magicCharm / 57 uniqueJewel / 99 rareMagicJewel / 358 set / 1771
+   rareGear / 53 unmatched, all categories interleaved and pre-packed
+   contiguously the way `compact_empty_tabs_first` would leave them)
+   reproduced it directly: `uniqueGear` needed 92 tabs (5 reserved + 87
+   borrowed) for its 356 items, and the whole plan used 166 tabs total.
+   Fixed by precomputing, once per `RunAutoSort` call, the set of item
+   handles that match ANY category in `layout` at all -- and excluding
+   every one of them from occupancy seeding, in every category's `tryFit`,
+   not just the category that will eventually claim them. Only a truly
+   unclassified item (matches nothing in `layout`) still blocks placement,
+   which is the only case where that's actually true. On a synthetic
+   stash built to match the user's real log this dropped `uniqueGear` to
+   11 tabs and the whole plan to 85 tabs total -- a ~2x reduction overall,
+   concentrated almost entirely in whichever category runs first. A live
+   run confirmed the density win directly: `uniqueGear` went from 78 tabs
+   for 356 items (the very first live run, before any of these fixes) down
+   to 9 tabs for the same 356 items, and the whole plan settled at 72
+   tabs used total.
+
+   **A third live run (after the density fix above) surfaced a real
+   collision** -- `RunAutoSort`'s own self-check caught 2 different items
+   both planned onto the exact same cell, and the game correctly refused
+   the whole transaction (`Result::Conflict`) rather than silently
+   corrupting anything. The cause was one specific gap in "is this item
+   actually going to get a move" that `willBeMoved` (see above) didn't
+   know about: the `"set"` mode's stream `match()` only checked
+   `quality == Set`, but the atomic-set placement loop *also* silently
+   skips any item whose `setGroupName` is empty -- which happens whenever
+   `SetGroupForRow` can't map `qualityRecordId` to a known set (see its
+   own doc comment in `item_classification.hpp`: such an item is meant to
+   be "treated the same as a completely unknown item", i.e. left alone,
+   never moved). `willBeMoved` trusts `stream.match()` as its single
+   source of truth for "will this handle get a move" -- so a Set-quality
+   item with an unresolved group name was wrongly marked as "about to
+   vacate" everywhere, while the actual placement loop never gave it a
+   move at all. It still got relabeled by the *compact* phase though
+   (`CompactEmptyTabsToEnd` doesn't care about classification, only about
+   closing tab-number gaps), landing it at a real, occupied cell inside
+   `set`'s own tab range -- which the (buggy) occupancy seeding then told
+   a different real set group was free to use too. Two items, one cell,
+   caught by the self-check exactly as designed. Fixed by making the
+   `"set"` mode's `match()` require a non-empty `setGroupName` itself
+   (`IsSetQuality(it) && !it.setGroupName.empty()`), so it's the single
+   accurate answer to "will this item actually be placed" that both
+   `willBeMoved` and the placement loop agree on (the placement loop's own
+   `setGroupName.empty()` check is now redundant, kept only as a
+   defensive belt-and-suspenders). Reproduced in isolation two ways: (1)
+   `RunAutoSort` alone confirms a real set group no longer lands on top of
+   an unresolved-group-name item's cell within `set`'s own tab range, and
+   (2) the full `RunAutoSortWithPadding` pipeline (compact relabeling the
+   stuck item into the exact cell a second group would otherwise claim)
+   reproduces the *exact* production collision with the old `match()` and
+   confirms zero collisions with the fix. `DetectCollisions` only catches
+   this class of bug when the "stuck" item also happens to get a
+   compact-phase move (so it appears in the moves list at all) -- an item
+   that never moves in ANY phase and still gets planned over would not be
+   caught by the self-check today; worth keeping in mind if a similar
+   "match() is broader than what actually gets placed" gap ever creeps
+   into another mode. Live-verified: the collision is gone and the
+   density win holds (`uniqueGear` 78->9 tabs, 356 items; whole plan 72
+   tabs). (`sort_engine.cpp`, the `"set"` mode's `match()` in
+   `BuiltinModes()`.)
 
 2. **`sortLevel` is an approximation.** It only carries the base item's own
    `levelreq` (from `weapons.txt`/`armor.txt`/`misc.txt`, baked into
@@ -293,10 +429,112 @@ here for review, same as the algorithm-level scope note below.
    bounding box, **without changing its `x`/`y`** (child rects are local
    offsets from the parent's `x`/`y` per `widgets.h`, so moving the parent's
    position would have shifted every button on screen instead of just
-   fixing hit-testing). Unverified against the live game as of this
-   writing -- if buttons are still unclickable after this, the SDK's actual
-   hit-testing rule is something else and needs `debug_log_ui_messages`
-   again to find out what a click there *does* produce.
+   fixing hit-testing).
+
+   **Iteration 6 -- root-rect fix confirmed deployed and retested; still no
+   click.** Verified this time (not just committed): rebuilt clean, redeployed,
+   and the rect-fix commit's `StashToolshd.json` (`width: 110, height: 980`)
+   was confirmed present in `deploy/` and the timestamps on the built DLL/mpq
+   are *after* the fix, ruling out "stale build" as an explanation. A fresh
+   `debug_log_ui_messages` firehose taken right after clicking still shows the
+   `LeftMouseButtonDown`/`LeftMouseButtonUp` pair but no
+   `target="remote-stash-sorting"` line anywhere near it -- so widening the
+   root rect did not fix it; that hypothesis is falsified. New data point from
+   the user: the clicked button *does* visibly go to its pressed frame
+   (`hoveredFrame`/press art), meaning the `ButtonWidget` itself is receiving
+   the mouse-down under the cursor -- the click is not simply missing the
+   widget's screen bounds. Yet `onClickMessage` never fires. Two diagnostics
+   were added to narrow this further without needing more guessing:
+   - `LogButtonStripRects` no longer waits for our own `target` to match
+     (that match has *never* been observed, so gating the diagnostic behind it
+     meant it had literally never run). It now fires once, automatically, the
+     first time any `UiMessage` arrives after the `StashTools` child layout
+     exists -- giving the engine-resolved rects unconditionally, without
+     needing a working click first.
+   - A self-test (`RunSelfTestDispatch`) is queued via `runOnUiThread` right
+     after the listener registers: it calls
+     `WidgetService::dispatchUiAction` with `target="remote-stash-sorting"`,
+     `command="SelfTest"` -- the exact same broadcast shape a real button
+     click is documented to use (PluginSDK README, "Existing Widgets":
+     "send a normal target/command/text action"). If the log shows
+     `self-test UiMessage received`, the listener registration and
+     target/command filtering are proven correct end-to-end, which would mean
+     the bug is entirely on the engine's side -- something is preventing the
+     click from ever reaching `dispatchUiAction` for this widget's
+     `onClickMessage`, not a bug in how this plugin listens for it.
+
+   Leading new suspect: `registerChildLayout` can only attach to
+   `StockPanel::PlayerInventory` (see above -- `SharedStash` isn't an
+   attachable target). In normal play, opening the Shared Stash shows it
+   *alongside* the player's inventory on the same screen. If the Stash
+   panel is a separate, higher-priority overlay with its own full-panel
+   click-catching (the working reference plugin `d2rl-charm-inv` does
+   exactly this in its own panel -- a `ClickCatcherWidget` spanning a large
+   rect specifically to intercept clicks before whatever is underneath),
+   that would explain everything observed: rendering is unaffected (it's a
+   separate concern from click routing), the button's own local
+   hover/press visual still updates from raw cursor position, but the
+   actual click-resolution hit-test never reaches into the
+   `PlayerInventory` child layout because the Stash panel's overlay wins it
+   first. This does not require a rebuild to test: open **only** the player
+   inventory (press the inventory key without interacting with a stash),
+   so the Shared Stash panel never opens, and click one of the five
+   buttons.
+
+   **Iteration 7 -- root cause found: onClickMessage cannot use a
+   plugin-invented target; found via `d2rloader.log`, not
+   `debug_log_ui_messages`.** The click-catcher theory above was never
+   tested -- a look at D2RLoader's own `d2rloader.log` (separate from this
+   plugin's per-plugin log) turned up the real cause first. Right around the
+   point the `PlayerInventory` panel is built, it logs three native
+   assertions from `D2UI\src\TypeDesc.cpp`, all about the literal string
+   `"remote-stash-sorting"`: `BC_ASSERT: hashValue != m_hashValues.end()`
+   ("Given key not found", `valueName = "remote-stash-sorting"`),
+   `BC_ASSERT: channel.IsValid()`, and `BC_ASSERT: false` ("Missing message
+   value list registration for %s", `buf = "remote-stash-sorting"`).
+   Assertion dialogs are disabled, so D2R just logs and silently continues
+   -- no crash, no visible error, nothing in this plugin's own log, nothing
+   in the `debug_log_ui_messages` firehose either, because the failure
+   happens *before* a UiMessage is ever broadcast. Reading between the
+   three messages: a `ButtonWidget.onClickMessage`'s `target` is validated
+   against a native, closed registry of "message channels" (`TypeDesc`'s
+   "message value list") when the JSON layout is parsed -- built-in names
+   like `PanelManager`, `InputMessage`, `MonsterHealth` are pre-registered;
+   an arbitrary plugin id like `"remote-stash-sorting"` is not, and never
+   becomes a registered channel just by calling
+   `SharedEventService::registerUiMessageListener` (that only makes the
+   plugin a listener for messages that get broadcast -- it does not
+   register the plugin's own id as a valid broadcast target). So every one
+   of the five buttons' `onClickMessage` values
+   (`"remote-stash-sorting:AutoSort"` etc.) failed this native validation
+   silently, every single time, and the click was dropped before it could
+   ever produce a `UiMessageEvent` -- fully explaining both symptoms at
+   once: the button still shows its native pressed frame (purely a local,
+   cursor-driven visual, unrelated to `onClickMessage`), and no
+   `target="remote-stash-sorting"` line, and no click-triggered
+   `LogButtonStripRects` output, ever appeared in any log, at any rect,
+   with or without the root-rect fix.
+
+   The fix: stop inventing a custom `onClickMessage` target entirely.
+   `PanelManager` *is* a pre-registered channel (it's how `d2rl-charm-inv`'s
+   own button already works: `"PanelManager:TogglePanel:charm-inv/CharmInvPanel"`),
+   and `PanelService` exposes `openPanel`/`closePanel`/`togglePanel` as
+   direct C++ calls too. So each button now targets
+   `"PanelManager:TogglePanel:remote-stash-sorting/Action<Name>"` against
+   one dedicated, invisible (`1x1`, no children) trigger panel per action --
+   five new panels (`ActionAutoSort`, `ActionAddBlankPage`,
+   `ActionRemoveCurrentPage`, `ActionPrevTab`, `ActionNextTab`), registered
+   in `D2RLoaderLoadPlugin` alongside the existing `Toast` panel, with
+   layout files
+   `d2rl-remote-stash-sorting.mpq/data/global/ui/layouts/remote-stash-sorting/Action<Name>hd.json`.
+   `OnUiMessage` now matches `target == "PanelManager"` and
+   `command == "TogglePanel"`, looks up `text` (the toggled panel's own
+   logical name) against the five trigger panels to find which button
+   fired, calls `closePanel` on it right away so the *next* click toggles
+   it open again instead of closed, and dispatches the matching action --
+   same `DoAutoSort`/`DoAddBlankPage`/etc. handlers as before, just reached
+   through a native, pre-registered channel instead of an invented one.
+   Unverified against the live game as of this writing.
 
 7. **No confirmed way yet to show the buttons only while Shared Stash is
    open.** Requested behavior: the button strip should only appear when the
@@ -342,6 +580,37 @@ here for review, same as the algorithm-level scope note below.
 11. **The `unidentified` sort mode isn't ported.** The save-editor has one;
     `DefaultLayout()` here mirrors the other ten `SS_AUTO_LAYOUT` entries
     only.
+
+12. **Item placement within a tab is best-fit, not monotonic -- a
+    deliberate deviation from the save-editor, by request.** The
+    save-editor's `_ssPlaceMonotonic` never looks behind its scan cursor
+    when placing an item, by its own design comment: "Places one item
+    without ever looking behind the cursor, so the on-screen reading order
+    always matches the sort order... Costs a few empty cells; that
+    trade-off is deliberate." A user found this produced visibly sparse
+    tabs (empty gaps on one page while a later page in the same category
+    still had items) and asked for denser packing instead, explicitly
+    accepting the loss of that strict order-preservation guarantee.
+    `PlaceBestFit` (`sort_engine.cpp`, replacing the removed
+    `PlaceMonotonic`) re-scans every free cell in a tab from the start for
+    each item, so tabs pack as densely as the grid allows; item order
+    within a tab can now be slightly out of the original scan order as a
+    result. `min_tabs`/borrowing and the padding pass above are
+    unaffected -- this only changes where an item lands *within* its
+    already-chosen tab.
+
+13. **Rotating an empty tab into position picks the nearest one, not the
+    farthest.** `_ssAddBlankTabsAtStart` in the save-editor scans backward
+    from the end of the save file for an empty tab to swap forward,
+    because a byte-level page swap there is O(1) regardless of distance.
+    This plugin has no raw pages to swap -- "moving" an empty tab means
+    relabeling every real item's `sharedStashPage` between the source and
+    destination via individual `ItemService` moves -- so `RotateEmptyTabTo`
+    (`sort_engine.cpp`, shared by the padding pass and
+    `blank_tabs_at_start`) deliberately picks the *nearest* empty tab
+    instead, minimizing the number of item-move operations. This mirrors
+    the convention already used by `MoveBlankTabAfter`/`PushBlankTabToEnd`
+    elsewhere in this plugin.
 
 ## Testing
 

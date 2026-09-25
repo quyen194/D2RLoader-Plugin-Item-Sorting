@@ -13,6 +13,27 @@ enabled = true
 # higher than the real count.
 shared_stash_tab_count = 200
 
+# Reserved leading tabs that Auto Sort and the padding pass never touch
+# (e.g. tabs you manage by hand). Mirrors the save-editor's startTab.
+start_tab = 0
+
+# After sorting + category padding, pull this many empty tabs to the front
+# of the active range (right after start_tab). Mirrors blankTabsAtStart /
+# _ssAddBlankTabsAtStart. Set to 0 to disable.
+blank_tabs_at_start = 3
+
+# Before sorting, relabel already-empty tabs (within the active range) to
+# the end of that range so Auto Sort has a clean run of empty tabs to fill
+# from. Mirrors compactEmptyTabsFirst / _ssCompactEmptyTabsToEnd. Leave
+# true unless you have a reason to preserve empty-tab positions as-is.
+compact_empty_tabs_first = true
+
+# After each category finishes, add one extra "breathing" blank tab once
+# that category's last used tab is at least this % full. Accepts "never",
+# "always", or a number 0-100. Mirrors addEmptyPageWhen / _ssWantsEmptyPage.
+# Overridable per category below.
+add_empty_page_when = 30
+
 # Notification style after Auto Sort / Add Blank Page / Remove Current Page
 # finish. v1 always shows the plugin's own toast panel with a Close button
 # (the WidgetService has no way to push fresh text into an already-open
@@ -75,10 +96,16 @@ min_tabs = 1
 [[remote-stash-sorting.layout]]
 mode_id = "set"
 min_tabs = 6
+# Reference default: always add a breathing page after Set gear (its tabs
+# tend to fill unevenly since full sets are rare).
+add_empty_page_when = "always"
 
 [[remote-stash-sorting.layout]]
 mode_id = "rareGear"
 min_tabs = 1
+# Reference default: never add a breathing page after Rare gear (it's
+# usually the last/overflow category, so padding it just wastes tabs).
+add_empty_page_when = "never"
 
 # This plugin only rearranges the local player's own shared stash, so its
 # settings do not affect other players and are not listed under [d2rl].

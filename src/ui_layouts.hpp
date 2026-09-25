@@ -185,7 +185,7 @@ inline std::string BuildToastLayoutJson() {
 						"filename": "Panel\\Modals\\ModalButton",
 						"focusIndicatorFilename": "Controller/HoverImages/ModalButton_Hover",
 						"pressedFrame": 1, "disabledFrame": 2, "hoveredFrame": 3,
-						"textString": "@d2r:strOK",
+						"textString": "@d2r:strClose",
 						"pointSize": "$MediumFontSize",
 						"textColor": "$FontColorWhite",
 						"onClickMessage": "PanelManager:ClosePanel:remote-stash-sorting/Toast"

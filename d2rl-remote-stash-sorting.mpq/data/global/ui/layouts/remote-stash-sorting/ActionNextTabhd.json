@@ -1,0 +1,8 @@
+{
+	"type": "Panel",
+	"name": "remote-stash-sorting/ActionNextTab",
+	"fields": {
+		"rect": { "x": 0, "y": 0, "width": 1, "height": 1 }
+	},
+	"children": []
+}

@@ -59,6 +59,20 @@ Panels::ChildLayoutHandle   g_buttonsChildLayout = Panels::InvalidChildLayoutHan
 Panels::RegistrationHandle  g_toastPanel         = Panels::InvalidHandle;
 SharedEvents::ListenerHandle g_uiMessageListener = SharedEvents::InvalidHandle;
 
+// Five invisible (1x1) "trigger" panels, one per button. See the "Known
+// gaps" #6 iteration 7 note in plugin.cpp's OnUiMessage: a button's
+// onClickMessage can only target a small set of D2R-native "message
+// channels" (PanelManager is one); a plugin-invented target string is
+// rejected by the engine's own TypeDesc validation before it is ever
+// broadcast. PanelManager:TogglePanel against one of these per-action
+// panels is the supported way to turn a click into a UiMessage this plugin
+// can react to.
+Panels::RegistrationHandle g_actionAutoSortPanel          = Panels::InvalidHandle;
+Panels::RegistrationHandle g_actionAddBlankPagePanel      = Panels::InvalidHandle;
+Panels::RegistrationHandle g_actionRemoveCurrentPagePanel = Panels::InvalidHandle;
+Panels::RegistrationHandle g_actionPrevTabPanel           = Panels::InvalidHandle;
+Panels::RegistrationHandle g_actionNextTabPanel           = Panels::InvalidHandle;
+
 // The SDK has no query for "which shared-stash tab is on screen right now"
 // or "how many active shared-stash tabs exist" (see README "Known gaps").
 // v1 works around the first gap by having the plugin track its own
@@ -81,9 +95,48 @@ struct Config {
 	// watching the log while toggling it in-game. Off by default -- this is
 	// a firehose, not something to leave on.
 	bool                                        debugLogUiMessages = false;
+
+	// Mirrors the save-editor's autosort.json layer (startTab,
+	// blankTabsAtStart, compactEmptyTabsFirst, addEmptyPageWhen) -- see
+	// sort_engine.hpp's AutoSortConfig comment for exactly what is and isn't
+	// ported (the quota-shortfall "padding" pass is not -- it doesn't apply
+	// to how this engine reserves tabs).
+	uint32_t                                    startTab              = 0;
+	uint32_t                                    blankTabsAtStart      = 3;
+	bool                                        compactEmptyTabsFirst = true;
+	RemoteStashSorting::EmptyPageRule           addEmptyPageWhen      = RemoteStashSorting::EmptyPageRule::AtPercent(30.0);
 };
 
 Config g_config;
+
+// "never" | "always" | 0-100 (any TOML number type) -> EmptyPageRule. Mirrors
+// _ssNormEmptyPageRule. Returns false (leaving *outRule untouched) when the
+// node is absent or its value doesn't parse, so callers can tell "not set,
+// inherit the global/default setting" apart from "set to an invalid value".
+template <typename Node>
+bool TryParseEmptyPageRule(toml::node_view<Node> node, RemoteStashSorting::EmptyPageRule* outRule) {
+	if (!node) {
+		return false;
+	}
+	if (const auto* s = node.as_string()) {
+		if (s->get() == "never") {
+			*outRule = RemoteStashSorting::EmptyPageRule::Never();
+			return true;
+		}
+		if (s->get() == "always") {
+			*outRule = RemoteStashSorting::EmptyPageRule::AtPercent(0.0);
+			return true;
+		}
+		return false;
+	}
+	if (auto d = node.template value<double>()) {
+		if (*d >= 0.0 && *d <= 100.0) {
+			*outRule = RemoteStashSorting::EmptyPageRule::AtPercent(*d);
+			return true;
+		}
+	}
+	return false;
+}
 
 Config LoadConfig(const PluginContext* ctx) {
 	Config cfg;
@@ -129,6 +182,21 @@ Config LoadConfig(const PluginContext* ctx) {
 	cfg.gridHeight         = section["grid"]["height"].value_or(13u);
 	cfg.debugLogUiMessages = section["debug_log_ui_messages"].value_or(false);
 
+	cfg.startTab              = section["start_tab"].value_or(0u);
+	cfg.blankTabsAtStart      = section["blank_tabs_at_start"].value_or(3u);
+	cfg.compactEmptyTabsFirst = section["compact_empty_tabs_first"].value_or(true);
+	{
+		auto node = section["add_empty_page_when"];
+		RemoteStashSorting::EmptyPageRule rule;
+		if (TryParseEmptyPageRule(node, &rule)) {
+			cfg.addEmptyPageWhen = rule;
+		} else if (node) {
+			ctx->LogWarn(
+				"remote-stash-sorting: add_empty_page_when must be \"never\", \"always\", or a number 0-100; using the built-in "
+				"default (30).");
+		}
+	}
+
 	if (auto layoutArr = section["layout"].as_array()) {
 		std::vector<RemoteStashSorting::CategorySpec> parsedLayout;
 		bool                                           allKnown = true;
@@ -143,7 +211,24 @@ Config LoadConfig(const PluginContext* ctx) {
 				allKnown = false;
 				break;
 			}
-			parsedLayout.push_back({ modeId, minTabs });
+
+			RemoteStashSorting::CategorySpec spec;
+			spec.id      = modeId;
+			spec.minTabs = minTabs;
+
+			auto                               overrideNode = (*row)["add_empty_page_when"];
+			RemoteStashSorting::EmptyPageRule catRule;
+			if (TryParseEmptyPageRule(overrideNode, &catRule)) {
+				spec.hasEmptyPageOverride = true;
+				spec.emptyPageOverride    = catRule;
+			} else if (overrideNode) {
+				ctx->LogWarn(
+					("remote-stash-sorting: [[layout]] entry '" + modeId
+					 + "' has an invalid add_empty_page_when; inheriting the global setting.")
+						.c_str());
+			}
+
+			parsedLayout.push_back(std::move(spec));
 		}
 		if (allKnown && !parsedLayout.empty()) {
 			cfg.layout = std::move(parsedLayout);
@@ -159,6 +244,16 @@ Config LoadConfig(const PluginContext* ctx) {
 
 struct EnumState {
 	std::vector<RemoteStashSorting::ItemFacts> facts;
+
+	// Classification coverage diagnostic (README "Known gaps" -- the
+	// generated item_classification_data.hpp table is only as good as its
+	// source *.txt snapshot). A code that fails to classify falls back to
+	// ItemFacts{} defaults (isGear=false, w=h=1), which silently excludes it
+	// from every auto-sort category *and* silently under-marks its true
+	// footprint if some other item's classification is what's wrong instead.
+	size_t                classifiedCount   = 0;
+	size_t                unclassifiedCount = 0;
+	std::vector<uint32_t> sampleUnclassifiedCodes;
 };
 
 auto __cdecl CollectSharedStashItem(const PluginContext*, const Items::ItemInfo* item, void* userData) noexcept -> Inventory::IterationAction {
@@ -187,6 +282,12 @@ auto __cdecl CollectSharedStashItem(const PluginContext*, const Items::ItemInfo*
 		fact.gearSlot     = cls->gearSlot;
 		fact.nonGearKind  = cls->nonGearKind;
 		fact.sortLevel    = cls->baseLevelReq;
+		++state->classifiedCount;
+	} else {
+		++state->unclassifiedCount;
+		if (state->sampleUnclassifiedCodes.size() < 12) {
+			state->sampleUnclassifiedCodes.push_back(item->code);
+		}
 	}
 	// v1 scope note (README "Known gaps"): sortLevel above is only the base
 	// item's own levelreq. The save-editor's _ssItemSortLevel also raises it
@@ -250,6 +351,38 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 			tabs.size(),
 			tabList.c_str());
 		ctx->LogInfo(buf);
+
+		// Classification coverage: how many of the scanned items resolved
+		// against item_classification_data.hpp vs fell back to defaults
+		// (isGear=false, w=h=1 -- see EnumState comment). A high miss rate,
+		// or misses concentrated on codes that should obviously be gear,
+		// points at the generated table being stale for this mod version
+		// rather than a bug in RunAutoSort/ApplyMoves themselves.
+		std::string sampleCodes;
+		for (uint32_t code : state->sampleUnclassifiedCodes) {
+			char text4[5] {
+				static_cast<char>(code & 0xFF), static_cast<char>((code >> 8) & 0xFF), static_cast<char>((code >> 16) & 0xFF),
+				static_cast<char>((code >> 24) & 0xFF), 0
+			};
+			for (char& c : text4) {
+				if (c != 0 && (c < 0x20 || c > 0x7E)) c = '?';
+			}
+			if (!sampleCodes.empty()) sampleCodes += ",";
+			sampleCodes += "'";
+			sampleCodes += text4;
+			sampleCodes += "'";
+		}
+		char classBuf[512];
+		std::snprintf(
+			classBuf,
+			sizeof(classBuf),
+			"remote-stash-sorting: item classification: %zu matched, %zu unmatched (defaults used -- excluded from "
+			"every category) out of %zu scanned. Sample unmatched codes: [%s]",
+			state->classifiedCount,
+			state->unclassifiedCount,
+			state->facts.size(),
+			sampleCodes.c_str());
+		ctx->LogInfo(classBuf);
 	}
 
 	return ok;
@@ -343,11 +476,17 @@ void ShowToast(const PluginContext* ctx, RemoteStashSorting::UiLayouts::OutcomeM
 		}
 	}
 
-	const uint32_t selected = g_selectedTab.load();
+	// The tab-number line shares screen space with the outcome-message text
+	// above it (both TextBoxWidgets, overlapping rects by design -- see
+	// ui_layouts.hpp), so it must only be shown for the TabSelected message;
+	// showing it unconditionally made every toast (Auto Sort result, Add
+	// Blank Page, etc.) render two overlapping lines of garbled text at once.
+	const bool     showTabDisplay = (message == UiLayouts::OutcomeMessage::TabSelected);
+	const uint32_t selected       = g_selectedTab.load();
 	for (uint32_t t = 0; t <= UiLayouts::kMaxDisplayableTab + 1; ++t) {
 		const bool        isOverflowSlot = (t == UiLayouts::kMaxDisplayableTab + 1);
 		const std::string name           = isOverflowSlot ? std::string("MsgTabOverflow") : UiLayouts::TabWidgetName(t);
-		const bool         shouldShow    = isOverflowSlot ? (selected > UiLayouts::kMaxDisplayableTab) : (t == selected);
+		const bool         shouldShow    = showTabDisplay && (isOverflowSlot ? (selected > UiLayouts::kMaxDisplayableTab) : (t == selected));
 
 		Widgets::WidgetHandle w = Widgets::InvalidHandle;
 		if (g_widgets->findWidget(ctx, panelWidget, name.c_str(), &w) == Widgets::Result::Success) {
@@ -400,7 +539,17 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 		return;
 	}
 
-	const auto outcome = RemoteStashSorting::RunAutoSort(state.facts, g_config.layout, g_config.tabCount, g_config.gridWidth, g_config.gridHeight);
+	RemoteStashSorting::AutoSortConfig sortCfg;
+	sortCfg.layout                = g_config.layout;
+	sortCfg.tabCount              = g_config.tabCount;
+	sortCfg.gridWidth             = g_config.gridWidth;
+	sortCfg.gridHeight            = g_config.gridHeight;
+	sortCfg.startTab              = g_config.startTab;
+	sortCfg.blankTabsAtStart      = g_config.blankTabsAtStart;
+	sortCfg.compactEmptyTabsFirst = g_config.compactEmptyTabsFirst;
+	sortCfg.addEmptyPageWhen      = g_config.addEmptyPageWhen;
+
+	const auto outcome = RemoteStashSorting::RunAutoSortWithPadding(state.facts, sortCfg);
 	if (!outcome.ok) {
 		const std::string logMsg = "remote-stash-sorting: auto sort failed: " + outcome.error;
 		ctx->LogWarn(logMsg.c_str());
@@ -417,6 +566,44 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 		}
 		QueueToast(ctx, msg);
 		return;
+	}
+
+	// Diagnostic: one line per category (tab span it actually used + how many
+	// items landed there) so a "weird" in-game result can be checked against
+	// what RunAutoSort actually planned, without guessing.
+	for (const auto& line : outcome.categoryLog) {
+		const std::string msg = "remote-stash-sorting: plan: " + line;
+		ctx->LogInfo(msg.c_str());
+	}
+
+	{
+		char padMsg[256];
+		std::snprintf(
+			padMsg, sizeof(padMsg),
+			"remote-stash-sorting: compacted %u item(s) to relabel empty tabs to the end; added %u breathing page(s); pulled %u/%u "
+			"blank tab(s) to the front.",
+			outcome.compactMoveCount, outcome.breathingTabsAdded, outcome.blankTabsAtStartAdded, g_config.blankTabsAtStart);
+		ctx->LogInfo(padMsg);
+	}
+
+	// Diagnostic: replay the plan against each item's live footprint and flag
+	// any two moves that would land on the same cell(s). This tells apart a
+	// planning-side bug (RunAutoSort / item classification data) from an
+	// application-side one (ApplyMoves / the live transaction) when the
+	// in-game result looks wrong -- see README "Known gaps".
+	const auto collisions = RemoteStashSorting::DetectCollisions(state.facts, outcome.moves, g_config.gridWidth, g_config.gridHeight);
+	if (!collisions.empty()) {
+		char summary[192];
+		std::snprintf(
+			summary, sizeof(summary), "remote-stash-sorting: plan self-check found %zu colliding move(s) (showing up to 20):",
+			collisions.size());
+		ctx->LogWarn(summary);
+		for (const auto& line : collisions) {
+			const std::string msg = "remote-stash-sorting: " + line;
+			ctx->LogWarn(msg.c_str());
+		}
+	} else {
+		ctx->LogInfo("remote-stash-sorting: plan self-check found no colliding moves.");
 	}
 
 	uint32_t   committed = 0;
@@ -526,15 +713,19 @@ void __cdecl DoRemoveCurrentPage(const PluginContext* ctx, void*) noexcept {
 // reports coordinates local to each widget's parent, so this is ground truth
 // from the engine instead of another screenshot-pixel guess. Called whenever
 // one of our own buttons is clicked (cheap -- user-triggered, not per-frame).
-void LogButtonStripRects(const PluginContext* ctx) {
+bool LogButtonStripRects(const PluginContext* ctx) {
 	if (ctx == nullptr || g_widgets == nullptr) {
-		return;
+		return false;
 	}
 
 	Widgets::WidgetHandle root = Widgets::InvalidHandle;
 	if (g_widgets->findPanel(ctx, "remote-stash-sorting/StashTools", &root) != Widgets::Result::Success) {
-		ctx->LogInfo("remote-stash-sorting: debug: could not find the StashTools root widget via findPanel.");
-		return;
+		// Silent -- called speculatively on every UiMessage until the
+		// PlayerInventory child layout actually exists (see the
+		// s_loggedRectsOnce call site in OnUiMessage below), so logging a
+		// failure here would spam a line per MouseMove before the player is
+		// ever in a game.
+		return false;
 	}
 
 	Widgets::Rect rootRect {};
@@ -563,6 +754,7 @@ void LogButtonStripRects(const PluginContext* ctx) {
 			ctx->LogInfo(buf);
 		}
 	}
+	return true;
 }
 
 auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessageEvent* event, void*) noexcept -> SharedEvents::UiMessageAction {
@@ -570,6 +762,16 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 
 	if (ctx == nullptr || event == nullptr || event->structSize < SharedEvents::UiMessageEventRequiredSize) {
 		return SharedEvents::UiMessageAction::Continue;
+	}
+
+	// Fires once, the first time any UiMessage arrives after the StashTools
+	// child layout actually exists -- not gated on our own target, since
+	// that filter is exactly what this diagnostic exists to debug (gating on
+	// it here would mean it never runs at all). Cheap: a couple of
+	// findPanel/findWidget calls, and it stops retrying once it succeeds.
+	static bool s_loggedRectsOnce = false;
+	if (!s_loggedRectsOnce) {
+		s_loggedRectsOnce = LogButtonStripRects(ctx);
 	}
 
 	// Debug aid for "Known gaps" #6/#7: with debug_log_ui_messages = true in
@@ -587,40 +789,73 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 		ctx->LogInfo(buf);
 	}
 
-	if (event->target == nullptr || event->command == nullptr) {
-		return SharedEvents::UiMessageAction::Continue;
-	}
-	if (std::strcmp(event->target, UiLayouts::kPluginId) != 0) {
+	if (event->target == nullptr || event->command == nullptr || event->text == nullptr) {
 		return SharedEvents::UiMessageAction::Continue;
 	}
 
-	LogButtonStripRects(ctx);
+	// Only D2R-native "PanelManager:TogglePanel" messages against one of our
+	// five dedicated trigger panels are ours to handle -- see the trigger-
+	// panel comment on the g_action*Panel globals above for why buttons are
+	// wired this way instead of a plugin-invented onClickMessage target.
+	if (std::strcmp(event->target, "PanelManager") != 0 || std::strcmp(event->command, "TogglePanel") != 0) {
+		return SharedEvents::UiMessageAction::Continue;
+	}
 
-	if (std::strcmp(event->command, "AutoSort") == 0) {
+	(void)LogButtonStripRects(ctx);
+
+	struct ActionBinding {
+		const char*                logicalName;
+		Panels::RegistrationHandle handle;
+	};
+	const ActionBinding bindings[] = {
+		{ "remote-stash-sorting/ActionAutoSort", g_actionAutoSortPanel },
+		{ "remote-stash-sorting/ActionAddBlankPage", g_actionAddBlankPagePanel },
+		{ "remote-stash-sorting/ActionRemoveCurrentPage", g_actionRemoveCurrentPagePanel },
+		{ "remote-stash-sorting/ActionPrevTab", g_actionPrevTabPanel },
+		{ "remote-stash-sorting/ActionNextTab", g_actionNextTabPanel },
+	};
+	const ActionBinding* matched = nullptr;
+	for (const ActionBinding& binding : bindings) {
+		if (std::strcmp(event->text, binding.logicalName) == 0) {
+			matched = &binding;
+			break;
+		}
+	}
+	if (matched == nullptr) {
+		// Some other plugin's or D2R's own panel toggled -- not ours.
+		return SharedEvents::UiMessageAction::Continue;
+	}
+
+	// TogglePanel just opened this (always-closed, invisible) trigger panel;
+	// close it right back so the next click toggles it open again instead of
+	// closed. Defensive/idempotent either way -- see the comment above.
+	if (matched->handle != Panels::InvalidHandle) {
+		(void)g_panels->closePanel(ctx, matched->handle);
+	}
+
+	if (std::strcmp(matched->logicalName, "remote-stash-sorting/ActionAutoSort") == 0) {
 		if (!g_config.enabled) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::AutoSortDisabled);
 		} else if (g_threads->runOnGameThread(ctx, DoAutoSort, nullptr) != Threads::Result::Success) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		}
-	} else if (std::strcmp(event->command, "AddBlankPage") == 0) {
+	} else if (std::strcmp(matched->logicalName, "remote-stash-sorting/ActionAddBlankPage") == 0) {
 		if (g_threads->runOnGameThread(ctx, DoAddBlankPage, nullptr) != Threads::Result::Success) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		}
-	} else if (std::strcmp(event->command, "RemoveCurrentPage") == 0) {
+	} else if (std::strcmp(matched->logicalName, "remote-stash-sorting/ActionRemoveCurrentPage") == 0) {
 		if (g_threads->runOnGameThread(ctx, DoRemoveCurrentPage, nullptr) != Threads::Result::Success) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		}
-	} else if (std::strcmp(event->command, "SelectPrevTab") == 0) {
+	} else if (std::strcmp(matched->logicalName, "remote-stash-sorting/ActionPrevTab") == 0) {
 		const uint32_t current = g_selectedTab.load();
 		g_selectedTab.store(current == 0 ? 0 : current - 1);
 		ShowToast(ctx, UiLayouts::OutcomeMessage::TabSelected);
-	} else if (std::strcmp(event->command, "SelectNextTab") == 0) {
+	} else if (std::strcmp(matched->logicalName, "remote-stash-sorting/ActionNextTab") == 0) {
 		const uint32_t current = g_selectedTab.load();
 		const uint32_t maxTab  = g_config.tabCount == 0 ? 0 : g_config.tabCount - 1;
 		g_selectedTab.store(current >= maxTab ? maxTab : current + 1);
 		ShowToast(ctx, UiLayouts::OutcomeMessage::TabSelected);
-	} else {
-		return SharedEvents::UiMessageAction::Continue;
 	}
 
 	return SharedEvents::UiMessageAction::Consume;
@@ -716,6 +951,32 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 	if (g_panels->registerPanel(context, &toastRegistration, &g_toastPanel) != Panels::Result::Success) {
 		context->LogError("remote-stash-sorting: could not register the toast panel.");
 		return false;
+	}
+
+	// Five invisible trigger panels, one per button -- see the g_action*Panel
+	// declarations near the top of this file for why. Each layout file is
+	// data/global/ui/layouts/remote-stash-sorting/Action<Name>hd.json in the
+	// companion mpq, a 1x1 Panel with no children.
+	struct ActionPanelSetup {
+		const char*                 localId;
+		Panels::RegistrationHandle* handle;
+	};
+	const ActionPanelSetup actionPanels[] = {
+		{ "ActionAutoSort", &g_actionAutoSortPanel },
+		{ "ActionAddBlankPage", &g_actionAddBlankPagePanel },
+		{ "ActionRemoveCurrentPage", &g_actionRemoveCurrentPagePanel },
+		{ "ActionPrevTab", &g_actionPrevTabPanel },
+		{ "ActionNextTab", &g_actionNextTabPanel },
+	};
+	for (const ActionPanelSetup& setup : actionPanels) {
+		const Panels::PanelRegistration registration {
+			.structSize = Panels::PanelRegistrationSize,
+			.localId    = setup.localId,
+		};
+		if (g_panels->registerPanel(context, &registration, setup.handle) != Panels::Result::Success) {
+			context->LogError("remote-stash-sorting: could not register a button trigger panel.");
+			return false;
+		}
 	}
 
 	const SharedEvents::UiMessageListener listener {

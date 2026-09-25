@@ -16,7 +16,7 @@
 						"filename": "d2rloader/remote-stash-sorting/charminvbutton",
 						"hoveredFrame": 3,
 						"tooltipString": "@remote-stash-sorting:AutoSortTooltip",
-						"onClickMessage": "remote-stash-sorting:AutoSort"
+						"onClickMessage": "PanelManager:TogglePanel:remote-stash-sorting/ActionAutoSort"
 					}
 				}
 			]
@@ -28,7 +28,7 @@
 				"filename": "d2rloader/remote-stash-sorting/charminvbutton",
 				"hoveredFrame": 3,
 				"tooltipString": "@remote-stash-sorting:AddBlankPageTooltip",
-				"onClickMessage": "remote-stash-sorting:AddBlankPage"
+				"onClickMessage": "PanelManager:TogglePanel:remote-stash-sorting/ActionAddBlankPage"
 			}
 		},
 		{
@@ -38,7 +38,7 @@
 				"filename": "d2rloader/remote-stash-sorting/charminvbutton",
 				"hoveredFrame": 3,
 				"tooltipString": "@remote-stash-sorting:RemoveCurrentPageTooltip",
-				"onClickMessage": "remote-stash-sorting:RemoveCurrentPage"
+				"onClickMessage": "PanelManager:TogglePanel:remote-stash-sorting/ActionRemoveCurrentPage"
 			}
 		},
 		{
@@ -48,7 +48,7 @@
 				"filename": "d2rloader/remote-stash-sorting/charminvbutton",
 				"hoveredFrame": 3,
 				"tooltipString": "@remote-stash-sorting:PrevTabTooltip",
-				"onClickMessage": "remote-stash-sorting:SelectPrevTab"
+				"onClickMessage": "PanelManager:TogglePanel:remote-stash-sorting/ActionPrevTab"
 			}
 		},
 		{
@@ -58,7 +58,7 @@
 				"filename": "d2rloader/remote-stash-sorting/charminvbutton",
 				"hoveredFrame": 3,
 				"tooltipString": "@remote-stash-sorting:NextTabTooltip",
-				"onClickMessage": "remote-stash-sorting:SelectNextTab"
+				"onClickMessage": "PanelManager:TogglePanel:remote-stash-sorting/ActionNextTab"
 			}
 		}
 	]

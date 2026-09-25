@@ -71,9 +71,32 @@ struct PlannedMove {
 	int32_t  destY = 0;
 };
 
+// "never" (rule never fires), or a 0-100 fill-percentage threshold ("always"
+// from a config file is just threshold 0 -- see LoadConfig/_ssNormEmptyPageRule
+// parity note in plugin.cpp). Mirrors the save-editor's addEmptyPageWhen.
+struct EmptyPageRule {
+	bool   enabled = false;
+	double percentThreshold = 30.0; // fill% above which a breathing tab is added
+
+	static EmptyPageRule Never() { return {}; }
+	static EmptyPageRule AtPercent(double pct) { return { true, pct }; }
+};
+
 struct CategorySpec {
+	std::string    id;
+	uint32_t       minTabs = 0;
+	bool           hasEmptyPageOverride = false; // false = inherit AutoSortConfig::addEmptyPageWhen
+	EmptyPageRule  emptyPageOverride;
+};
+
+// One category's placement in the tab sequence, filled in by RunAutoSort for
+// the padding pass below to work from.
+struct CategorySpan {
 	std::string id;
-	uint32_t    minTabs = 0;
+	uint32_t    start = 0;      // first tab index in this category's run
+	uint32_t    end = 0;        // one past the last tab index (== cursor after)
+	uint32_t    tabsUsed = 0;   // end - start, kept in sync as padding grows it
+	bool        matchedAnything = false;
 };
 
 // Mirrors SS_AUTO_LAYOUT: tabs 1-5 unique/crafted gear, tab 6 unique ring/amu,
@@ -87,22 +110,43 @@ std::vector<CategorySpec> DefaultLayout();
 bool IsKnownModeId(const std::string& id);
 
 struct SortOutcome {
-	bool                     ok = false;
-	std::string              error;               // set when !ok
-	uint32_t                 failedStepIndex = kUnknownTab; // index into `layout` that failed
-	std::vector<PlannedMove> moves;
-	uint32_t                 tabsUsed = 0;
-	uint32_t                 itemsSorted = 0;
-	std::vector<std::string> skippedCategories; // categories with nothing to sort
+	bool                       ok = false;
+	std::string                error;               // set when !ok
+	uint32_t                   failedStepIndex = kUnknownTab; // index into `layout` that failed
+	std::vector<PlannedMove>   moves;
+	uint32_t                   tabsUsed = 0;
+	uint32_t                   itemsSorted = 0;
+	std::vector<std::string>   skippedCategories; // categories with nothing to sort
+	std::vector<std::string>   categoryLog; // one line per category: tab span + item count (diagnostic)
+	std::vector<CategorySpan>  spans; // one per layout entry, in order -- feeds the padding pass
 };
 
 // tabCount is the number of *active* normal shared-stash tabs, discovered by
 // Phase 2 (the SDK has no tab-count query -- see README "Open questions").
-// gridWidth/gridHeight default to the save-editor's confirmed 16x13.
+// gridWidth/gridHeight default to the save-editor's confirmed 16x13. startTab
+// reserves that many leading tabs: the layout's first category starts at
+// tab `startTab` instead of tab 0, and nothing in this call ever targets a
+// tab below it (mirrors the save-editor's startTab).
 SortOutcome RunAutoSort(
 	const std::vector<ItemFacts>&    items,
 	const std::vector<CategorySpec>& layout,
 	uint32_t                         tabCount,
+	uint32_t                         gridWidth = 16,
+	uint32_t                         gridHeight = 13,
+	uint32_t                         startTab = 0);
+
+// Independent post-hoc sanity check: re-derives each move's item footprint
+// from `items` (by handle) and replays every move into a fresh per-tab grid,
+// in the same order they appear in `moves`, flagging any move whose target
+// cells are already occupied by an earlier move or by a pre-existing item
+// this plan never touches. Returns one human-readable description per
+// collision found (capped), empty if the plan is clean. This exists purely
+// to tell planning-side bugs (RunAutoSort/classification data) apart from
+// application-side ones (ApplyMoves/the live transaction) when a sort looks
+// wrong in-game -- see README "Known gaps".
+std::vector<std::string> DetectCollisions(
+	const std::vector<ItemFacts>&    items,
+	const std::vector<PlannedMove>&  moves,
 	uint32_t                         gridWidth = 16,
 	uint32_t                         gridHeight = 13);
 
@@ -130,6 +174,68 @@ ShiftOutcome MoveBlankTabAfter(
 ShiftOutcome PushBlankTabToEnd(
 	const std::vector<ItemFacts>& items,
 	uint32_t                      currentTab,
+	uint32_t                      tabCount);
+
+// --- Auto Sort orchestration: compact / pad / blank-at-start ------------
+//
+// Mirrors the save-editor's autosort.json layer (startTab, blankTabsAtStart,
+// compactEmptyTabsFirst, addEmptyPageWhen) end to end: RunAutoSortWithPadding
+// runs RunAutoSort, then (optionally) inserts one "breathing" blank tab
+// after any category whose last tab is fuller than its threshold, then
+// (optionally) pulls blankTabsAtStart empty tabs up to the front. Every
+// phase reads a local working copy of `items` that is kept in sync with the
+// previous phase's planned moves, so e.g. the padding pass sees tabs exactly
+// where the sort actually left them, and blank-at-start sees them exactly
+// where padding left them -- all without touching the live game until the
+// caller applies the final combined `moves` list in one transaction.
+//
+// Not ported: the save-editor's quota-shortfall padding pass
+// (_ssPadAutoLayout's pass 1 / the `padding: roundRobin|inOrder|off` knob).
+// That pass exists there because an empty category reserves *nothing* up
+// front and has to be handed its quota after the fact; RunAutoSort here
+// always reserves a category's minTabs immediately (see its own comment),
+// so an empty category already ends up with minTabs left blank in place --
+// there is no shortfall left for a pass 1 to redistribute. Only the
+// "breathing page" pass (pass 2 / addEmptyPageWhen) applies.
+struct AutoSortConfig {
+	std::vector<CategorySpec> layout;
+	uint32_t                  tabCount = 0;
+	uint32_t                  gridWidth = 16;
+	uint32_t                  gridHeight = 13;
+	uint32_t                  startTab = 0;
+	uint32_t                  blankTabsAtStart = 0;
+	bool                      compactEmptyTabsFirst = false;
+	EmptyPageRule             addEmptyPageWhen; // global default; a category can override via CategorySpec
+};
+
+struct AutoSortPlan {
+	bool                       ok = false;
+	std::string                error;
+	uint32_t                   failedStepIndex = kUnknownTab;
+	std::vector<PlannedMove>   moves; // every phase's moves, in the order they must be applied
+	uint32_t                   itemsSorted = 0;
+	uint32_t                   tabsUsed = 0; // end of the category layout, before padding/blank-at-start
+	std::vector<std::string>   skippedCategories;
+	std::vector<std::string>   categoryLog;
+	uint32_t                   compactMoveCount = 0;    // item moves spent relabeling empty tabs to the end
+	uint32_t                   breathingTabsAdded = 0;  // categories that got a pass-2 padding tab
+	uint32_t                   blankTabsAtStartAdded = 0; // of cfg.blankTabsAtStart, how many actually landed
+};
+
+AutoSortPlan RunAutoSortWithPadding(
+	const std::vector<ItemFacts>& items,
+	const AutoSortConfig&         cfg);
+
+// Pure relabeling: slides every empty tab in [startTab, tabCount) to the end
+// of that range, keeping the relative order of the non-empty ones (and of
+// the empty ones) otherwise unchanged. No item's x/y changes, only which tab
+// number it is in -- mirrors _ssCompactEmptyTabsToEnd without the
+// save-editor's physical-byte-page constraint (a "tab" is just a number
+// here). Exposed separately from RunAutoSortWithPadding so a caller can run
+// it on its own (e.g. before a manual sort) if useful.
+std::vector<PlannedMove> CompactEmptyTabsToEnd(
+	const std::vector<ItemFacts>& items,
+	uint32_t                      startTab,
 	uint32_t                      tabCount);
 
 }
