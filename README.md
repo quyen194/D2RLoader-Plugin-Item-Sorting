@@ -147,6 +147,13 @@ reference; the two settings you're most likely to need to change:
   the full accepted-key reference; every entry has a sensible built-in
   default, so neither field needs to be set unless you want to change the
   ordering.
+- `mod_data_path` -- leave empty (`""`, the default) to classify items
+  using the table embedded in the DLL at build time. Set it to a mod's own
+  folder (the one containing `data/global/excel/itemtypes.txt` etc. -- e.g.
+  `D:\\Games\\DiabloII-Resurrected\\DiabloII-Resurrected\\mods\\Reimagined\\Reimagined.mpq`)
+  to have the plugin parse that mod's own txt files fresh, every Auto Sort
+  run, instead. Falls back to the embedded table with a log warning if the
+  path or its files can't be read. See "Known gaps" #3 for why this exists.
 - Almost everything in this file (every setting except `enabled`,
   `debug_log_ui_messages`, and `[grid]`) re-reads from disk on every Auto
   Sort run -- edit and save the file, then just run Auto Sort again, no game
@@ -410,6 +417,27 @@ here for review, same as the algorithm-level scope note below.
    + raw `qualityRecordId` whenever the lookup still comes back empty)
    stays in place in case a different, still-unknown misalignment shows up
    somewhere else in the table.
+
+   The blank-row bug above is really a special case of a broader risk:
+   `item_classification_data.hpp` is a snapshot, generated once at build
+   time (`tools/gen_classification.py`) from a *bundled reference copy* of
+   `itemtypes/weapons/armor/misc/setitems.txt` -- not from whatever mod is
+   actually active in the running game. If a mod's data ever diverges from
+   that bundled copy (a future Reimagined patch renumbers `setitems.txt`
+   rows again, or you point this plugin at a different mod entirely), the
+   embedded table goes stale and Classify()/SetGroupForRow() start lying
+   again, silently, exactly like this bug did. There's no SDK-level fix for
+   this today (the SDK's `DataTableService` doesn't publish typed row
+   structs for these tables either -- see gap #2 above), so as a practical
+   mitigation there is now a `mod_data_path` setting (see "Config" above): point it at a mod's
+   own folder and the plugin parses that mod's *own* txt files fresh, every
+   Auto Sort run, instead of trusting the embedded snapshot. Leave it empty
+   to keep using the embedded table (the default, and still the right
+   choice if you don't know your mod's data folder path). This was
+   validated offline by parsing the same reference txt files this table
+   was generated from and diffing every one of the 724 classification
+   entries and all 455 `kSetGroupByRow` rows against the embedded table:
+   zero mismatches.
 
 4. **No SDK query for "which tab is currently displayed."** Worked around
    with a plugin-tracked "selected tab" pointer (starts at 0, moved with the

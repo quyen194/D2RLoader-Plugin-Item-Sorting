@@ -45,4 +45,27 @@ std::optional<Facts> Classify(uint32_t packedItemCode);
 // atomic-set grouping skip the item, same as a completely unknown item would).
 std::string SetGroupForRow(int32_t qualityRecordId);
 
+// Optional runtime alternative to the embedded table above: parses the
+// active mod's OWN itemtypes/weapons/armor/misc/setitems.txt (from
+// <modDataPath>/data/global/excel/) and switches Classify()/
+// SetGroupForRow() to use that instead, so classification always matches
+// whichever mod is actually running rather than a possibly-stale bundled
+// reference copy. See mod_item_data.hpp for the parser and README "Config"
+// for the mod_data_path setting that drives this.
+//
+// Returns true on success. Returns false and leaves the embedded table
+// active on any failure (empty path, missing/unreadable file, malformed
+// data); if `error` is non-null it receives a short human-readable reason
+// the caller should log.
+bool LoadFromModFolder(const std::string& modDataPath, std::string* error = nullptr);
+
+// Reverts to the embedded, build-time-generated table. Called with an
+// empty mod_data_path config value.
+void UseEmbeddedTable();
+
+// True if a mod-folder override (LoadFromModFolder) is currently active,
+// false if Classify()/SetGroupForRow() are answering from the embedded
+// table. For logging/diagnostics only.
+bool IsUsingModFolder();
+
 }

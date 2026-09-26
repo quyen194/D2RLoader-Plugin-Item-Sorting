@@ -40,6 +40,8 @@ add_library(RemoteStashSortEngine STATIC
 	src/item_classification.cpp
 	src/item_classification.hpp
 	src/item_classification_data.hpp
+	src/mod_item_data.cpp
+	src/mod_item_data.hpp
 )
 target_include_directories(RemoteStashSortEngine PUBLIC src)
 

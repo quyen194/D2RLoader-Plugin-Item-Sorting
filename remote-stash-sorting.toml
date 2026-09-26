@@ -55,16 +55,32 @@ notification_seconds = 4 # reserved for a future auto-dismiss timer; unused in v
 # back off once you're done.
 debug_log_ui_messages = false
 
+# Item classification (which gear slot/size/set an item code is, used to sort
+# it into the right category) normally comes from a table generated at build
+# time from a bundled reference copy of itemtypes/weapons/armor/misc/
+# setitems.txt. That copy can silently drift out of sync with whatever mod
+# you actually have active (this happened for real -- see README "Known
+# gaps" for a Set-item bug this caused). Leave this empty ("") to use that
+# embedded table. Set it to your mod's own folder (the one containing a
+# data/global/excel/ subfolder with its own itemtypes.txt etc. -- typically
+# the same folder as its .mpq, e.g. a loose-folder mod during dev) to have
+# the plugin parse THAT mod's own txt files fresh instead, every Auto Sort
+# run, so classification always matches exactly what you're running. Falls
+# back to the embedded table (with a log warning) if the path or its files
+# can't be read.
+# Example: mod_data_path = "D:\\Games\\DiabloII-Resurrected\\DiabloII-Resurrected\\mods\\Reimagined\\Reimagined.mpq"
+mod_data_path = ""
+
 # ── What reloads when, without restarting the game ─────────────────────────
 # Auto Sort re-reads this whole file from disk every time you run it, EXCEPT
 # for three settings that only take effect at plugin load time and therefore
 # need a game restart to pick up a change: `enabled`, `debug_log_ui_messages`,
 # and [remote-stash-sorting.grid] below. Every other setting in this file --
 # shared_stash_tab_count, start_tab, blank_tabs_at_start,
-# compact_empty_tabs_first, add_empty_page_when, and the entire [[layout]]
-# list including each entry's min_tabs / add_empty_page_when / sort_keys /
-# gear_groups -- can be edited and takes effect on the very next Auto Sort
-# run, no restart needed.
+# compact_empty_tabs_first, add_empty_page_when, mod_data_path, and the
+# entire [[layout]] list including each entry's min_tabs /
+# add_empty_page_when / sort_keys / gear_groups -- can be edited and takes
+# effect on the very next Auto Sort run, no restart needed.
 
 # Grid size per shared-stash tab, in cells. 16x13 is the confirmed size for
 # the game's shared stash; only override this if live testing finds a

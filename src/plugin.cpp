@@ -107,6 +107,16 @@ struct Config {
 	uint32_t                                    blankTabsAtStart      = 3;
 	bool                                        compactEmptyTabsFirst = true;
 	RemoteStashSorting::EmptyPageRule           addEmptyPageWhen      = RemoteStashSorting::EmptyPageRule::AtPercent(30.0);
+
+	// Empty (the default) means "use the embedded, build-time-generated
+	// item_classification_data.hpp table". Non-empty is a mod folder (e.g.
+	// "D:\...\mods\Reimagined\Reimagined.mpq") whose OWN
+	// data/global/excel/{itemtypes,weapons,armor,misc,setitems}.txt are
+	// parsed fresh (see mod_item_data.hpp) so item classification always
+	// matches whichever mod is actually active, instead of a bundled
+	// reference copy that can silently drift out of sync with it (see
+	// README "Known gaps" for the concrete bug this was added to fix).
+	std::string                                 modDataPath;
 };
 
 Config g_config;
@@ -257,6 +267,28 @@ Config LoadConfig(const PluginContext* ctx) {
 			cfg.layout = std::move(parsedLayout);
 		} else if (!allKnown) {
 			ctx->LogWarn("remote-stash-sorting: config has an unknown mode_id in [[layout]]; using the built-in default layout instead.");
+		}
+	}
+
+	cfg.modDataPath = section["mod_data_path"].value_or(std::string {});
+
+	// Switch the item-classification table (item_classification.cpp) to
+	// match: empty path -> embedded table, non-empty -> parse that mod's own
+	// txt files fresh. This re-parses on every LoadConfig call (i.e. every
+	// Auto Sort click, same as the rest of hot-reload) rather than caching
+	// by path, matching this plugin's existing "just re-read everything"
+	// hot-reload philosophy -- the txt files involved are a few hundred KB
+	// total, not a per-frame cost.
+	if (cfg.modDataPath.empty()) {
+		RemoteStashSorting::Classification::UseEmbeddedTable();
+	} else {
+		std::string loadError;
+		if (!RemoteStashSorting::Classification::LoadFromModFolder(cfg.modDataPath, &loadError)) {
+			ctx->LogWarn(
+				("remote-stash-sorting: mod_data_path is set to '" + cfg.modDataPath + "' but could not be used (" + loadError
+				 + "); falling back to the embedded classification table.")
+					.c_str());
+			// LoadFromModFolder already reverted to the embedded table on failure.
 		}
 	}
 
