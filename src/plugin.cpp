@@ -28,6 +28,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -138,6 +139,25 @@ bool TryParseEmptyPageRule(toml::node_view<Node> node, RemoteStashSorting::Empty
 	return false;
 }
 
+// A TOML array of strings -> vector<string>, e.g. a [[layout]] entry's
+// sort_keys or gear_groups. Missing, not-an-array, or an array with
+// non-string entries all just yield an empty vector (CategorySpec then falls
+// back to its mode's own built-in default -- see sort_engine.cpp), same
+// "degrade gracefully" spirit as TryParseEmptyPageRule above.
+template <typename Node>
+std::vector<std::string> ParseStringArray(toml::node_view<Node> node) {
+	std::vector<std::string> out;
+	if (const auto* arr = node.as_array()) {
+		out.reserve(arr->size());
+		for (auto&& v : *arr) {
+			if (auto s = v.template value<std::string>()) {
+				out.push_back(std::move(*s));
+			}
+		}
+	}
+	return out;
+}
+
 Config LoadConfig(const PluginContext* ctx) {
 	Config cfg;
 	cfg.layout = RemoteStashSorting::DefaultLayout();
@@ -213,8 +233,10 @@ Config LoadConfig(const PluginContext* ctx) {
 			}
 
 			RemoteStashSorting::CategorySpec spec;
-			spec.id      = modeId;
-			spec.minTabs = minTabs;
+			spec.id         = modeId;
+			spec.minTabs    = minTabs;
+			spec.sortKeys   = ParseStringArray((*row)["sort_keys"]);
+			spec.gearGroups = ParseStringArray((*row)["gear_groups"]);
 
 			auto                               overrideNode = (*row)["add_empty_page_when"];
 			RemoteStashSorting::EmptyPageRule catRule;
@@ -420,36 +442,81 @@ auto ApplyMoves(const PluginContext* ctx, PlayerHandle player, const std::vector
 			"atomic across all of them (see README).");
 	}
 
-	uint32_t totalCommitted = 0;
-	size_t   offset         = 0;
-	while (offset < ops.size()) {
-		const size_t chunkSize = std::min<size_t>(Items::MaxExistingItemOperations, ops.size() - offset);
+	uint32_t       totalCommitted = 0;
+	Items::Result  worstResult    = Items::Result::Success; // first non-Success result seen, if any
+
+	// A single call to executeExistingItemTransaction is all-or-nothing (see
+	// ExistingItemTransactionResult's own doc comment: "committedOperationCount
+	// is zero on failure") -- so one operation this API rejects (e.g. an item
+	// it doesn't consider movable from wherever it actually is) sinks every
+	// other, otherwise-fine operation riding in the same call with it. A
+	// 3000+ item Auto Sort plan committing zero moves because of one bad item
+	// is exactly that failure mode, and the plain per-4096-chunk loop below
+	// had no way to tell "one poison operation" apart from "everything is
+	// broken." `attempt` isolates it instead: on any non-Success result it
+	// bisects the failing slice and retries each half separately, recursing
+	// down to individual operations when necessary, so the plan still commits
+	// everything it safely can and only the genuinely-rejected operation(s)
+	// are skipped (and logged by handle/destination, so which item and why is
+	// no longer a mystery next time this happens). Each Move destination is
+	// idempotent (an exact tab/x/y), so retrying a slice that may have
+	// partially applied despite reporting failure is harmless either way.
+	std::function<void(size_t, size_t)> attempt = [&](size_t begin, size_t end) {
+		if (begin >= end) {
+			return;
+		}
 
 		Items::ExistingItemTransaction txn {};
-		txn.structSize      = Items::ExistingItemTransactionSize;
-		txn.player           = player;
-		txn.operationCount   = static_cast<uint32_t>(chunkSize);
-		txn.operations       = ops.data() + offset;
+		txn.structSize     = Items::ExistingItemTransactionSize;
+		txn.player         = player;
+		txn.operationCount = static_cast<uint32_t>(end - begin);
+		txn.operations     = ops.data() + begin;
 
 		Items::ExistingItemTransactionResult result {};
 		result.structSize = Items::ExistingItemTransactionResultSize;
 
 		const auto txnResult = g_items->executeExistingItemTransaction(ctx, &txn, &result);
-		if (txnResult != Items::Result::Success) {
-			if (committedCount != nullptr) {
-				*committedCount = totalCommitted;
-			}
-			return txnResult;
+		if (txnResult == Items::Result::Success) {
+			totalCommitted += result.committedOperationCount;
+			return;
 		}
 
-		totalCommitted += result.committedOperationCount;
+		if (worstResult == Items::Result::Success) {
+			worstResult = txnResult; // remember the first failure code seen
+		}
+
+		if (end - begin == 1) {
+			// Isolated to one operation: log exactly which item/destination
+			// the game rejected and why, then move on instead of losing the
+			// rest of an otherwise-good plan to it.
+			const auto& op = ops[begin];
+			char        msg[256];
+			std::snprintf(
+				msg, sizeof(msg),
+				"remote-stash-sorting: move for item handle %llu -> tab %u (%u,%u) was rejected (result %u); skipping "
+				"just this item, the rest of the plan is unaffected.",
+				static_cast<unsigned long long>(op.item), op.move.destination.sharedStashPage, op.move.destination.x,
+				op.move.destination.y, static_cast<unsigned>(txnResult));
+			ctx->LogWarn(msg);
+			return;
+		}
+
+		const size_t mid = begin + (end - begin) / 2;
+		attempt(begin, mid);
+		attempt(mid, end);
+	};
+
+	size_t offset = 0;
+	while (offset < ops.size()) {
+		const size_t chunkSize = std::min<size_t>(Items::MaxExistingItemOperations, ops.size() - offset);
+		attempt(offset, offset + chunkSize);
 		offset += chunkSize;
 	}
 
 	if (committedCount != nullptr) {
 		*committedCount = totalCommitted;
 	}
-	return Items::Result::Success;
+	return totalCommitted == ops.size() ? Items::Result::Success : worstResult;
 }
 
 // --- Toast -------------------------------------------------------------
@@ -524,6 +591,23 @@ void QueueToast(const PluginContext* ctx, RemoteStashSorting::UiLayouts::Outcome
 
 void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 	namespace UiLayouts = RemoteStashSorting::UiLayouts;
+
+	// Hot-reload: re-read the config file fresh on every Auto Sort run and
+	// take every setting except the three that only take effect at plugin
+	// load time and therefore need a game restart to change (`enabled`,
+	// `debug_log_ui_messages`, and the [grid] width/height) -- see the config
+	// file's own "What reloads when" comment. This runs on the game thread
+	// (same as the rest of DoAutoSort), so g_config is never read mid-update
+	// by another thread.
+	{
+		Config fresh                   = LoadConfig(ctx);
+		g_config.tabCount              = fresh.tabCount;
+		g_config.layout                = std::move(fresh.layout);
+		g_config.startTab              = fresh.startTab;
+		g_config.blankTabsAtStart      = fresh.blankTabsAtStart;
+		g_config.compactEmptyTabsFirst = fresh.compactEmptyTabsFirst;
+		g_config.addEmptyPageWhen      = fresh.addEmptyPageWhen;
+	}
 
 	PlayerHandle player = InvalidPlayerHandle;
 	if (g_inventory->getLocalPlayer(ctx, &player) != Inventory::Result::Success) {

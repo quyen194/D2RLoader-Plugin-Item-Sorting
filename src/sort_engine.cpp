@@ -11,21 +11,27 @@ namespace RemoteStashSorting {
 
 namespace {
 
-constexpr uint32_t kQualityMagic   = 4;
-constexpr uint32_t kQualitySet     = 5;
-constexpr uint32_t kQualityRare    = 6;
-constexpr uint32_t kQualityUnique  = 7;
-constexpr uint32_t kQualityCrafted = 8;
+constexpr uint32_t kQualityInferior = 1;
+constexpr uint32_t kQualityNormal   = 2;
+constexpr uint32_t kQualitySuperior = 3;
+constexpr uint32_t kQualityMagic    = 4;
+constexpr uint32_t kQualitySet      = 5;
+constexpr uint32_t kQualityRare     = 6;
+constexpr uint32_t kQualityUnique   = 7;
+constexpr uint32_t kQualityCrafted  = 8;
 
 bool IsUniqueLike(const ItemFacts& it) { return it.quality == kQualityUnique || it.quality == kQualityCrafted; }
 bool IsRare(const ItemFacts& it) { return it.quality == kQualityRare; }
 bool IsMagic(const ItemFacts& it) { return it.quality == kQualityMagic; }
+bool IsSuperior(const ItemFacts& it) { return it.quality == kQualitySuperior; }
+bool IsNormalQuality(const ItemFacts& it) { return it.quality == kQualityNormal; }
 bool IsSetQuality(const ItemFacts& it) { return it.quality == kQualitySet; }
 
 // Crafted (q=8) sorts ahead of unique (q=7) inside each group -- mirrors
-// _ssQualityRank.
+// _ssQualityRank. Every other quality ties under this key (it only exists to
+// break the crafted/unique ambiguity within a single "uniqueGear"-like
+// stream); the "quality" sort key name below resolves to this.
 int64_t QualityRank(const ItemFacts& it) { return it.quality == kQualityCrafted ? 0 : 1; }
-int64_t IlvlDesc(const ItemFacts& it) { return -static_cast<int64_t>(it.itemLevel); }
 
 // Coarser key that runs ahead of the gear-group index: armor first, then
 // one-handed weapons, then two-handed. Mirrors _ssHandTier. GearSlot enum
@@ -38,66 +44,206 @@ int64_t HandTier(const ItemFacts& it) {
 	return it.isTwoHanded ? 2 : 1;
 }
 
-// Bucket index used as the primary gear sort key. GearSlot's declaration
-// order matches SS_GEAR_GROUPS exactly (Helm, Torso, Belt, Gloves, Boots,
-// Shield, Axe, Sword, Knife, ClubMace, Scepter, Wand, Staff, Orb, Spear,
-// Polearm, Javelin, Bow, Arrows, Crossbow, Bolts, Claw, OtherWeapon), so the
-// enum value doubles as the group index.
-int64_t GearGroupIndex(const ItemFacts& it) { return static_cast<int64_t>(it.gearSlot); }
-
 std::string TieBreakName(const ItemFacts& it) {
 	return it.baseNameKey.empty() ? std::to_string(it.code) : it.baseNameKey;
 }
 
-// Generic 5-int + 1-string comparison key. Which field holds what varies by
-// category (see BuildStreams) -- streams only ever compare items against
-// other items matched by that same stream, so an unused slot just stays 0
-// for everyone and drops out of the comparison.
-struct SortKey {
-	int64_t     k0 = 0, k1 = 0, k2 = 0, k3 = 0, k4 = 0;
+// --- Generalized, config-driven sort keys -------------------------------
+//
+// Every category's sort order is now a named, ordered list of keys (a
+// CategorySpec::sortKeys, parsed into ParsedSortKey below), resolved against
+// one item at a time into a CompoundKey and compared field-by-field. This
+// replaces what used to be a fixed 5-int/1-string SortKey with a hardcoded
+// per-mode lambda: the field *count* and *meaning* are now whatever the
+// config (or, absent config, the mode's own defaultSortKeys, chosen to
+// reproduce the original hardcoded behavior exactly) says they are.
+
+struct KeyField {
+	bool        isText = false;
+	int64_t     num    = 0;
 	std::string text;
+	bool        desc   = false; // true = "-" prefix on this key's name
 };
 
-bool KeyLess(const SortKey& a, const SortKey& b) {
-	if (a.k0 != b.k0) return a.k0 < b.k0;
-	if (a.k1 != b.k1) return a.k1 < b.k1;
-	if (a.k2 != b.k2) return a.k2 < b.k2;
-	if (a.k3 != b.k3) return a.k3 < b.k3;
-	if (a.k4 != b.k4) return a.k4 < b.k4;
-	return a.text < b.text;
+struct CompoundKey {
+	std::vector<KeyField> fields;
+};
+
+bool CompoundKeyLess(const CompoundKey& a, const CompoundKey& b) {
+	const size_t n = std::min(a.fields.size(), b.fields.size());
+	for (size_t i = 0; i < n; ++i) {
+		const KeyField& fa = a.fields[i];
+		const KeyField& fb = b.fields[i];
+		if (fa.isText) {
+			if (fa.text != fb.text) return fa.desc ? (fa.text > fb.text) : (fa.text < fb.text);
+		} else {
+			if (fa.num != fb.num) return fa.desc ? (fa.num > fb.num) : (fa.num < fb.num);
+		}
+	}
+	return false;
+}
+
+struct ParsedSortKey {
+	std::string name;
+	bool        desc = false;
+};
+
+std::vector<ParsedSortKey> ParseSortKeys(const std::vector<std::string>& raw) {
+	std::vector<ParsedSortKey> out;
+	out.reserve(raw.size());
+	for (const auto& s : raw) {
+		if (s.empty()) continue;
+		if (s[0] == '-')
+			out.push_back({ s.substr(1), true });
+		else
+			out.push_back({ s, false });
+	}
+	return out;
+}
+
+// Default (natural) 23-slot gear order -- GearSlot's own declaration order,
+// which matches SS_GEAR_GROUPS exactly (see the enum's comment in the
+// header).
+const std::vector<GearSlot>& DefaultGearOrder() {
+	static const std::vector<GearSlot> order = {
+		GearSlot::Helm,  GearSlot::Torso,    GearSlot::Belt,   GearSlot::Gloves, GearSlot::Boots, GearSlot::Shield,
+		GearSlot::Axe,   GearSlot::Sword,    GearSlot::Knife,  GearSlot::ClubMace, GearSlot::Scepter, GearSlot::Wand,
+		GearSlot::Staff, GearSlot::Orb,      GearSlot::Spear,  GearSlot::Polearm, GearSlot::Javelin, GearSlot::Bow,
+		GearSlot::Arrows, GearSlot::Crossbow, GearSlot::Bolts, GearSlot::Claw,    GearSlot::OtherWeapon,
+	};
+	return order;
+}
+
+// The 23 short keys a config's gear_groups list uses, mapped to GearSlot.
+// Matches the config file's own documented key list exactly.
+GearSlot GearSlotFromConfigKey(const std::string& key) {
+	static const std::unordered_map<std::string, GearSlot> map = {
+		{ "helm", GearSlot::Helm },     { "tors", GearSlot::Torso },   { "belt", GearSlot::Belt },
+		{ "glov", GearSlot::Gloves },   { "boot", GearSlot::Boots },   { "shld", GearSlot::Shield },
+		{ "axe", GearSlot::Axe },       { "swor", GearSlot::Sword },   { "knif", GearSlot::Knife },
+		{ "blun", GearSlot::ClubMace }, { "scep", GearSlot::Scepter }, { "wand", GearSlot::Wand },
+		{ "staf", GearSlot::Staff },    { "orb", GearSlot::Orb },      { "spea", GearSlot::Spear },
+		{ "pole", GearSlot::Polearm },  { "jave", GearSlot::Javelin }, { "bow", GearSlot::Bow },
+		{ "bowq", GearSlot::Arrows },   { "xbow", GearSlot::Crossbow },{ "xboq", GearSlot::Bolts },
+		{ "h2h", GearSlot::Claw },      { "weap", GearSlot::OtherWeapon },
+	};
+	auto found = map.find(key);
+	return found == map.end() ? GearSlot::None : found->second;
+}
+
+// Builds this category's gear-group priority order (lower = sorts first):
+// slots named in `gearGroupNames`, in the order given, come first; every
+// slot left out keeps its default relative position, appended after in
+// DefaultGearOrder's own order. An empty/all-unknown input is just the
+// default order untouched.
+std::unordered_map<GearSlot, int64_t> BuildGearGroupPriority(const std::vector<std::string>& gearGroupNames) {
+	std::unordered_map<GearSlot, int64_t> priority;
+	int64_t                               next = 0;
+	for (const auto& name : gearGroupNames) {
+		GearSlot slot = GearSlotFromConfigKey(name);
+		if (slot == GearSlot::None) continue; // unknown key name -- ignore rather than fail the whole category
+		if (priority.count(slot)) continue;   // duplicate -- first occurrence wins
+		priority[slot] = next++;
+	}
+	for (GearSlot slot : DefaultGearOrder()) {
+		if (!priority.count(slot)) priority[slot] = next++;
+	}
+	return priority;
+}
+
+// Resolves one named key (already stripped of any "-" prefix) against one
+// item into a KeyField. `gearOrder` is this category's own resolved
+// gear-group priority map (see BuildGearGroupPriority), used only by
+// "gearGroup". Returns false for an unrecognized name so the caller can skip
+// it silently -- a typo in a config's sort_keys degrades to "this key has no
+// effect" rather than a hard failure.
+bool ResolveKeyField(const std::string& name, const ItemFacts& it, const std::unordered_map<GearSlot, int64_t>& gearOrder, KeyField& out) {
+	if (name == "reqLevel") {
+		out.num = static_cast<int64_t>(it.sortLevel);
+		return true;
+	}
+	if (name == "ilvl") {
+		out.num = static_cast<int64_t>(it.itemLevel);
+		return true;
+	}
+	if (name == "name" || name == "itemName") {
+		out.isText = true;
+		out.text   = TieBreakName(it);
+		return true;
+	}
+	if (name == "quality") {
+		out.num = QualityRank(it);
+		return true;
+	}
+	if (name == "handTier") {
+		out.num = HandTier(it);
+		return true;
+	}
+	if (name == "gearGroup") {
+		auto found = gearOrder.find(it.gearSlot);
+		out.num    = found == gearOrder.end() ? static_cast<int64_t>(gearOrder.size()) : found->second;
+		return true;
+	}
+	if (name == "setName") {
+		out.isText = true;
+		out.text   = it.setGroupName;
+		return true;
+	}
+	if (name == "size") {
+		out.num = static_cast<int64_t>(it.h);
+		return true;
+	}
+	return false;
+}
+
+CompoundKey BuildSortKey(
+	const ItemFacts& it, const std::vector<ParsedSortKey>& keys, const std::unordered_map<GearSlot, int64_t>& gearOrder) {
+	CompoundKey k;
+	k.fields.reserve(keys.size());
+	for (const auto& pk : keys) {
+		KeyField f;
+		f.desc = pk.desc;
+		if (!ResolveKeyField(pk.name, it, gearOrder, f)) continue;
+		k.fields.push_back(f);
+	}
+	return k;
 }
 
 enum class FillDir { Row, ColLeft, ColRight };
 
 struct Stream {
-	std::function<bool(const ItemFacts&)>   match;
-	FillDir                                 dir = FillDir::Row;
-	std::function<SortKey(const ItemFacts&)> key;
+	std::function<bool(const ItemFacts&)> match;
+	FillDir                                dir = FillDir::Row;
 };
 
 struct Mode {
-	std::string        id;
-	bool                atomicSets = false;
-	std::vector<Stream> streams;
+	std::string              id;
+	bool                     atomicSets = false;
+	// Dynamic catch-all: this mode's real match predicate isn't its stream's
+	// (which is a placeholder, always false) -- it is "not matched by any
+	// OTHER mode present in the current layout", computed fresh per
+	// RunAutoSort call (see `claimedByOthers`/`streamMatches` there) since it
+	// depends on which categories the caller's config actually lists.
+	bool                     catchAll = false;
+	// Used when a CategorySpec's own sortKeys is empty -- chosen, per mode, to
+	// reproduce this plugin's original hardcoded ordering exactly.
+	std::vector<std::string> defaultSortKeys;
+	std::vector<Stream>      streams;
 };
+
+// Resolves the sort_keys this category actually sorts by: its own config
+// override if it set one, else its mode's built-in default.
+std::vector<ParsedSortKey> EffectiveSortKeys(const CategorySpec& spec, const Mode& mode) {
+	return ParseSortKeys(spec.sortKeys.empty() ? mode.defaultSortKeys : spec.sortKeys);
+}
 
 // Mirrors SS_SORT_MODES / _ssRingAmuletModes. Ring fills from the left
 // column, amulet from the right, so the two never interleave.
-Stream RingAmuStream(bool isRing, std::function<bool(const ItemFacts&)> qualityMatch, bool ranked) {
+Stream RingAmuStream(bool isRing, std::function<bool(const ItemFacts&)> qualityMatch) {
 	Stream s;
 	s.dir = isRing ? FillDir::ColLeft : FillDir::ColRight;
 	NonGearKind want = isRing ? NonGearKind::Ring : NonGearKind::Amulet;
 	s.match = [qualityMatch, want](const ItemFacts& it) { return qualityMatch(it) && it.nonGearKind == want; };
-	s.key = [ranked](const ItemFacts& it) {
-		SortKey k;
-		int i = 0;
-		if (ranked) k.k0 = QualityRank(it);
-		k.k1 = static_cast<int64_t>(it.sortLevel);
-		k.k2 = IlvlDesc(it);
-		k.text = TieBreakName(it);
-		(void)i;
-		return k;
-	};
 	return s;
 }
 
@@ -106,9 +252,10 @@ const std::vector<Mode>& BuiltinModes() {
 		std::vector<Mode> m;
 
 		m.push_back(Mode {
-			.id         = "set",
-			.atomicSets = true,
-			.streams    = { Stream {
+			.id              = "set",
+			.atomicSets      = true,
+			.defaultSortKeys = { "setName", "reqLevel", "-ilvl", "itemName" },
+			.streams         = { Stream {
 				   // Set-quality with an unresolved setGroupName (SetGroupForRow
 				   // couldn't map qualityRecordId to a known set) is documented
 				   // (item_classification.hpp, SetGroupForRow) to be treated
@@ -126,135 +273,124 @@ const std::vector<Mode>& BuiltinModes() {
 				   // its old cell while another item planned to land on it.)
 				   .match = [](const ItemFacts& it) { return IsSetQuality(it) && !it.setGroupName.empty(); },
 				   .dir   = FillDir::Row,
-				   .key   = [](const ItemFacts&) { return SortKey {}; },
 			   } },
 		});
 
 		m.push_back(Mode {
-			.id      = "uniqueGear",
-			.streams = { Stream {
-				.match = [](const ItemFacts& it) { return IsUniqueLike(it) && it.isGear; },
-				.dir   = FillDir::Row,
-				.key =
-					[](const ItemFacts& it) {
-					SortKey k;
-					k.k0   = HandTier(it);
-					k.k1   = GearGroupIndex(it);
-					k.k2   = QualityRank(it);
-					k.k3   = static_cast<int64_t>(it.sortLevel);
-					k.k4   = IlvlDesc(it);
-					k.text = TieBreakName(it);
-					return k;
-				},
-			} },
+			.id              = "uniqueGear",
+			.defaultSortKeys = { "handTier", "gearGroup", "quality", "reqLevel", "-ilvl", "name" },
+			.streams         = { Stream {
+				   .match = [](const ItemFacts& it) { return IsUniqueLike(it) && it.isGear; },
+				   .dir   = FillDir::Row,
+			   } },
 		});
 
 		m.push_back(Mode {
-			.id      = "rareGear",
-			.streams = { Stream {
-				.match = [](const ItemFacts& it) { return IsRare(it) && it.isGear; },
-				.dir   = FillDir::Row,
-				.key =
-					[](const ItemFacts& it) {
-					SortKey k;
-					k.k0   = HandTier(it);
-					k.k1   = GearGroupIndex(it);
-					k.k3   = static_cast<int64_t>(it.sortLevel);
-					k.k4   = IlvlDesc(it);
-					k.text = TieBreakName(it);
-					return k;
-				},
-			} },
+			.id              = "rareGear",
+			.defaultSortKeys = { "handTier", "gearGroup", "reqLevel", "-ilvl", "name" },
+			.streams         = { Stream {
+				   .match = [](const ItemFacts& it) { return IsRare(it) && it.isGear; },
+				   .dir   = FillDir::Row,
+			   } },
+		});
+
+		// NEW -- magic/superior/normal quality-tier gear. Before these existed,
+		// a magic/superior/normal-quality helm/weapon/etc had no dedicated
+		// category and fell all the way through to "unclassified" below; now
+		// each quality tier gets its own tab(s) just like unique/rare already
+		// had.
+		m.push_back(Mode {
+			.id              = "magicGear",
+			.defaultSortKeys = { "handTier", "gearGroup", "reqLevel", "-ilvl", "name" },
+			.streams         = { Stream {
+				   .match = [](const ItemFacts& it) { return IsMagic(it) && it.isGear; },
+				   .dir   = FillDir::Row,
+			   } },
 		});
 
 		m.push_back(Mode {
-			.id      = "uniqueCharm",
-			.streams = { Stream {
-				.match = [](const ItemFacts& it) { return IsUniqueLike(it) && it.nonGearKind == NonGearKind::Charm; },
-				.dir   = FillDir::Row,
-				.key =
-					[](const ItemFacts& it) {
-					SortKey k;
-					k.k0   = -static_cast<int64_t>(it.h);
-					k.k1   = QualityRank(it);
-					k.k2   = static_cast<int64_t>(it.sortLevel);
-					k.k3   = IlvlDesc(it);
-					k.text = TieBreakName(it);
-					return k;
-				},
-			} },
+			.id              = "superiorGear",
+			.defaultSortKeys = { "handTier", "gearGroup", "reqLevel", "-ilvl", "name" },
+			.streams         = { Stream {
+				   .match = [](const ItemFacts& it) { return IsSuperior(it) && it.isGear; },
+				   .dir   = FillDir::Row,
+			   } },
 		});
 
 		m.push_back(Mode {
-			.id      = "magicCharm",
-			.streams = { Stream {
-				.match = [](const ItemFacts& it) { return IsMagic(it) && it.nonGearKind == NonGearKind::Charm; },
-				.dir   = FillDir::Row,
-				.key =
-					[](const ItemFacts& it) {
-					SortKey k;
-					k.k0   = -static_cast<int64_t>(it.h);
-					k.k2   = static_cast<int64_t>(it.sortLevel);
-					k.k3   = IlvlDesc(it);
-					k.text = TieBreakName(it);
-					return k;
-				},
-			} },
+			.id              = "normalGear",
+			.defaultSortKeys = { "handTier", "gearGroup", "reqLevel", "-ilvl", "name" },
+			.streams         = { Stream {
+				   .match = [](const ItemFacts& it) { return IsNormalQuality(it) && it.isGear; },
+				   .dir   = FillDir::Row,
+			   } },
 		});
 
 		m.push_back(Mode {
-			.id      = "uniqueJewel",
-			.streams = { Stream {
-				.match = [](const ItemFacts& it) { return IsUniqueLike(it) && it.nonGearKind == NonGearKind::Jewel; },
-				.dir   = FillDir::Row,
-				.key =
-					[](const ItemFacts& it) {
-					SortKey k;
-					k.k0   = QualityRank(it);
-					k.k1   = static_cast<int64_t>(it.sortLevel);
-					k.k2   = IlvlDesc(it);
-					k.text = TieBreakName(it);
-					return k;
-				},
-			} },
+			.id              = "uniqueCharm",
+			.defaultSortKeys = { "-size", "quality", "reqLevel", "-ilvl", "name" },
+			.streams         = { Stream {
+				   .match = [](const ItemFacts& it) { return IsUniqueLike(it) && it.nonGearKind == NonGearKind::Charm; },
+				   .dir   = FillDir::Row,
+			   } },
 		});
 
 		m.push_back(Mode {
-			.id = "rareMagicJewel",
+			.id              = "magicCharm",
+			.defaultSortKeys = { "-size", "reqLevel", "-ilvl", "name" },
+			.streams         = { Stream {
+				   .match = [](const ItemFacts& it) { return IsMagic(it) && it.nonGearKind == NonGearKind::Charm; },
+				   .dir   = FillDir::Row,
+			   } },
+		});
+
+		m.push_back(Mode {
+			.id              = "uniqueJewel",
+			.defaultSortKeys = { "quality", "reqLevel", "-ilvl", "name" },
+			.streams         = { Stream {
+				   .match = [](const ItemFacts& it) { return IsUniqueLike(it) && it.nonGearKind == NonGearKind::Jewel; },
+				   .dir   = FillDir::Row,
+			   } },
+		});
+
+		m.push_back(Mode {
+			.id              = "rareMagicJewel",
+			.defaultSortKeys = { "reqLevel", "-ilvl", "name" },
 			.streams =
 				{
 					Stream {
 						.match = [](const ItemFacts& it) { return IsRare(it) && it.nonGearKind == NonGearKind::Jewel; },
 						.dir   = FillDir::ColLeft,
-						.key =
-							[](const ItemFacts& it) {
-							SortKey k;
-							k.k1   = static_cast<int64_t>(it.sortLevel);
-							k.k2   = IlvlDesc(it);
-							k.text = TieBreakName(it);
-							return k;
-						},
 					},
 					Stream {
 						.match = [](const ItemFacts& it) { return IsMagic(it) && it.nonGearKind == NonGearKind::Jewel; },
 						.dir   = FillDir::ColRight,
-						.key =
-							[](const ItemFacts& it) {
-							SortKey k;
-							k.k1   = static_cast<int64_t>(it.sortLevel);
-							k.k2   = IlvlDesc(it);
-							k.text = TieBreakName(it);
-							return k;
-						},
 					},
 				},
 		});
 
-		m.push_back(Mode { .id = "uniqueRingAmu",
-			.streams              = { RingAmuStream(true, IsUniqueLike, true), RingAmuStream(false, IsUniqueLike, true) } });
-		m.push_back(Mode { .id = "rareRingAmu", .streams = { RingAmuStream(true, IsRare, false), RingAmuStream(false, IsRare, false) } });
-		m.push_back(
-			Mode { .id = "magicRingAmu", .streams = { RingAmuStream(true, IsMagic, false), RingAmuStream(false, IsMagic, false) } });
+		m.push_back(Mode { .id              = "uniqueRingAmu",
+			.defaultSortKeys                = { "quality", "reqLevel", "-ilvl", "name" },
+			.streams                        = { RingAmuStream(true, IsUniqueLike), RingAmuStream(false, IsUniqueLike) } });
+		m.push_back(Mode { .id              = "rareRingAmu",
+			.defaultSortKeys                = { "reqLevel", "-ilvl", "name" },
+			.streams                        = { RingAmuStream(true, IsRare), RingAmuStream(false, IsRare) } });
+		m.push_back(Mode { .id              = "magicRingAmu",
+			.defaultSortKeys                = { "reqLevel", "-ilvl", "name" },
+			.streams                        = { RingAmuStream(true, IsMagic), RingAmuStream(false, IsMagic) } });
+
+		// NEW -- the catch-all. Its stream's match() is never actually called
+		// (RunAutoSort special-cases catchAll: see `streamMatches` there,
+		// which uses "not claimed by any other mode in THIS layout" instead)
+		// -- it exists only so this mode still has exactly one Row-direction
+		// stream to iterate, keeping it structurally identical to every other
+		// non-atomic mode.
+		m.push_back(Mode {
+			.id              = "unclassified",
+			.catchAll        = true,
+			.defaultSortKeys = { "quality", "reqLevel", "name" },
+			.streams         = { Stream { .match = [](const ItemFacts&) { return false; }, .dir = FillDir::Row } },
+		});
 
 		return m;
 	}();
@@ -343,16 +479,20 @@ std::optional<std::pair<int32_t, int32_t>> PackBestFit(Occupancy& occ, uint32_t 
 
 std::vector<CategorySpec> DefaultLayout() {
 	return {
-		{ "uniqueGear", 5 },
-		{ "uniqueRingAmu", 1 },
-		{ "rareRingAmu", 1 },
-		{ "magicRingAmu", 1 },
-		{ "uniqueCharm", 1 },
-		{ "magicCharm", 2 },
-		{ "uniqueJewel", 1 },
-		{ "rareMagicJewel", 1 },
-		{ "set", 6 },
-		{ "rareGear", 1 },
+		{ "uniqueGear", 5, true, EmptyPageRule::Never() },
+		{ "uniqueRingAmu", 1, true, EmptyPageRule::Never() },
+		{ "rareRingAmu", 1, true, EmptyPageRule::Never() },
+		{ "magicRingAmu", 1, true, EmptyPageRule::Never() },
+		{ "uniqueCharm", 1, true, EmptyPageRule::Never() },
+		{ "magicCharm", 2, true, EmptyPageRule::Never() },
+		{ "uniqueJewel", 1, true, EmptyPageRule::Never() },
+		{ "rareMagicJewel", 1, true, EmptyPageRule::Never() },
+		{ "set", 6, true, EmptyPageRule::AtPercent(0) }, // "always"
+		{ "rareGear", 1, true, EmptyPageRule::Never() },
+		{ "magicGear", 1, true, EmptyPageRule::Never() },
+		{ "superiorGear", 1, true, EmptyPageRule::Never() },
+		{ "normalGear", 1, true, EmptyPageRule::Never() },
+		{ "unclassified", 1, true, EmptyPageRule::Never() },
 	};
 }
 
@@ -406,6 +546,28 @@ SortOutcome RunAutoSort(
 	// ends up needing far more borrowed tabs than it actually needs, which
 	// is exactly what a live run surfaced (a category needing dozens of
 	// near-empty borrowed tabs just to get past that phantom occupancy).
+	// "unclassified" (Mode::catchAll) has no static match predicate of its
+	// own -- it matches whatever every OTHER mode actually present in THIS
+	// layout does not. Compute that "claimed" set first, from every non-
+	// catchAll mode's real streams, so streamMatches below can answer for a
+	// catchAll mode too. If a layout removes a category entirely (e.g. no
+	// "rareGear" entry), rareGear's items are simply never added to
+	// claimedByOthers, so unclassified's "not claimed" test naturally scoops
+	// them up -- no special-casing needed beyond this.
+	std::unordered_set<uint64_t> claimedByOthers;
+	claimedByOthers.reserve(items.size());
+	for (const auto& spec : layout) {
+		const Mode* mode = FindMode(spec.id);
+		if (mode == nullptr || mode->catchAll) continue;
+		for (const auto& stream : mode->streams)
+			for (const auto& it : items)
+				if (stream.match(it)) claimedByOthers.insert(it.handle);
+	}
+	auto streamMatches = [&claimedByOthers](const Mode* mode, const Stream& stream, const ItemFacts& it) -> bool {
+		if (mode->catchAll) return claimedByOthers.find(it.handle) == claimedByOthers.end();
+		return stream.match(it);
+	};
+
 	std::unordered_set<uint64_t> willBeMoved;
 	willBeMoved.reserve(items.size());
 	for (const auto& spec : layout) {
@@ -413,7 +575,7 @@ SortOutcome RunAutoSort(
 		if (mode == nullptr) continue; // reported as a hard error once this step is actually reached below
 		for (const auto& stream : mode->streams)
 			for (const auto& it : items)
-				if (stream.match(it)) willBeMoved.insert(it.handle);
+				if (streamMatches(mode, stream, it)) willBeMoved.insert(it.handle);
 	}
 
 	uint32_t cursor = std::min(startTab, tabCount);
@@ -432,6 +594,12 @@ SortOutcome RunAutoSort(
 		// many of minTabs are available, then borrow" behavior instead of a
 		// hard "not enough tabs" error before even trying.
 		const uint32_t reserved = tabCount > cursor ? std::min(spec.minTabs, tabCount - cursor) : 0u;
+
+		// Resolved once per category (config-driven, same for every stream and
+		// every borrow retry within this category -- see EffectiveSortKeys /
+		// BuildGearGroupPriority).
+		const std::vector<ParsedSortKey>            sortKeys  = EffectiveSortKeys(spec, *mode);
+		const std::unordered_map<GearSlot, int64_t> gearOrder = BuildGearGroupPriority(spec.gearGroups);
 
 		// Tries to place the whole category (every stream, or every set
 		// group) into exactly `dests`, from a clean Occupancy grid seeded
@@ -459,7 +627,7 @@ SortOutcome RunAutoSort(
 				for (const auto& stream : mode->streams) {
 					std::vector<const ItemFacts*> matched;
 					for (const auto& it : items)
-						if (stream.match(it)) matched.push_back(&it);
+						if (streamMatches(mode, stream, it)) matched.push_back(&it);
 					if (matched.empty()) continue;
 					result.matchedAnything = true;
 
@@ -469,7 +637,7 @@ SortOutcome RunAutoSort(
 					const uint64_t estimatedMinTabs = capacityPerTab == 0 ? 0 : (totalCells + capacityPerTab - 1) / capacityPerTab;
 
 					std::stable_sort(matched.begin(), matched.end(), [&](const ItemFacts* a, const ItemFacts* b) {
-						return KeyLess(stream.key(*a), stream.key(*b));
+						return CompoundKeyLess(BuildSortKey(*a, sortKeys, gearOrder), BuildSortKey(*b, sortKeys, gearOrder));
 					});
 
 					auto order = ScanOrder(stream.dir, gridWidth, gridHeight);
@@ -510,11 +678,28 @@ SortOutcome RunAutoSort(
 					}
 				}
 			} else {
-				// Atomic-set placement: group by setGroupName, alphabetical
-				// order, each group placed whole into one dest tab, or split
-				// across two consecutive dest tabs if it does not fit in one
-				// (mirrors _ssPlanSort's Phase 1 / Phase 2).
-				std::map<std::string, std::vector<const ItemFacts*>> groups;
+				// Atomic-set placement: group by setGroupName, each group
+				// placed whole into one dest tab, or split across two
+				// consecutive dest tabs if it does not fit in one (mirrors
+				// _ssPlanSort's Phase 1 / Phase 2). Group order and each
+				// group's own item order are both config-driven: "setName" in
+				// sortKeys picks the group order/direction (default
+				// ascending, same as a bare std::map always gave before this
+				// was configurable); every other key in sortKeys, in order,
+				// sorts the items within one group before packing.
+				bool                        setNameDesc = false;
+				bool                        sawSetName  = false;
+				std::vector<ParsedSortKey> intraGroupKeys;
+				for (const auto& pk : sortKeys) {
+					if (!sawSetName && pk.name == "setName") {
+						setNameDesc = pk.desc;
+						sawSetName  = true;
+						continue;
+					}
+					intraGroupKeys.push_back(pk);
+				}
+
+				std::map<std::string, std::vector<const ItemFacts*>> groups; // std::map keeps ascending-by-name iteration order
 				for (const auto& it : items) {
 					if (!mode->streams[0].match(it)) continue;
 					// match() itself now requires a non-empty setGroupName (see
@@ -524,6 +709,19 @@ SortOutcome RunAutoSort(
 					groups[it.setGroupName].push_back(&it);
 				}
 				for (auto& [groupName, groupItems] : groups) {
+					std::stable_sort(groupItems.begin(), groupItems.end(), [&](const ItemFacts* a, const ItemFacts* b) {
+						return CompoundKeyLess(BuildSortKey(*a, intraGroupKeys, gearOrder), BuildSortKey(*b, intraGroupKeys, gearOrder));
+					});
+				}
+
+				std::vector<std::map<std::string, std::vector<const ItemFacts*>>::iterator> groupOrder;
+				groupOrder.reserve(groups.size());
+				for (auto it = groups.begin(); it != groups.end(); ++it) groupOrder.push_back(it);
+				if (setNameDesc) std::reverse(groupOrder.begin(), groupOrder.end());
+
+				for (auto& groupIt : groupOrder) {
+					const std::string&              groupName  = groupIt->first;
+					std::vector<const ItemFacts*>&  groupItems = groupIt->second;
 					result.matchedAnything = true;
 					bool fitted             = false;
 					for (uint32_t t : dests) {

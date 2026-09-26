@@ -131,10 +131,21 @@ reference; the two settings you're most likely to need to change:
   round up if you're unsure.
 - `[[layout]]` entries -- one per category, in fill order, mirroring
   `SS_AUTO_LAYOUT` from the save-editor. `mode_id` must be one of:
-  `set`, `uniqueGear`, `rareGear`, `uniqueCharm`, `magicCharm`,
-  `uniqueJewel`, `rareMagicJewel`, `uniqueRingAmu`, `rareRingAmu`,
-  `magicRingAmu`. (The save-editor also has an `unidentified` mode; it isn't
-  ported here -- see "Known gaps".)
+  `set`, `uniqueGear`, `rareGear`, `magicGear`, `superiorGear`, `normalGear`,
+  `uniqueCharm`, `magicCharm`, `uniqueJewel`, `rareMagicJewel`,
+  `uniqueRingAmu`, `rareRingAmu`, `magicRingAmu`, `unclassified`. (The
+  save-editor also has an `unidentified` mode; it isn't ported here -- see
+  "Known gaps" #11.)
+- `sort_keys` / `gear_groups` (per `[[layout]]` entry) -- this category's
+  own sort order and, for gear categories, its own slot/weapon-type bucket
+  order. See "Known gaps" #14 below and the config file's own comments for
+  the full accepted-key reference; every entry has a sensible built-in
+  default, so neither field needs to be set unless you want to change the
+  ordering.
+- Almost everything in this file (every setting except `enabled`,
+  `debug_log_ui_messages`, and `[grid]`) re-reads from disk on every Auto
+  Sort run -- edit and save the file, then just run Auto Sort again, no game
+  restart needed. See "Known gaps" #14.
 
 ## Known gaps (please review before relying on this)
 
@@ -578,8 +589,12 @@ here for review, same as the algorithm-level scope note below.
    rare (would need on the order of thousands of items in play at once).
 
 11. **The `unidentified` sort mode isn't ported.** The save-editor has one;
-    `DefaultLayout()` here mirrors the other ten `SS_AUTO_LAYOUT` entries
-    only.
+    `DefaultLayout()` here mirrors the other `SS_AUTO_LAYOUT` entries only.
+    Since #14 below added a dynamic `unclassified` catch-all, an
+    unidentified item is no longer silently left wherever it started (it
+    lands in `unclassified` like any other item with no dedicated
+    category) -- it just doesn't get the save-editor's own dedicated
+    `unidentified` column layout.
 
 12. **Item placement within a tab is best-fit, not monotonic -- a
     deliberate deviation from the save-editor, by request.** The
@@ -611,6 +626,64 @@ here for review, same as the algorithm-level scope note below.
     instead, minimizing the number of item-move operations. This mirrors
     the convention already used by `MoveBlankTabAfter`/`PushBlankTabToEnd`
     elsewhere in this plugin.
+
+14. **Quality-tier gear categories, a dynamic "unclassified" catch-all,
+    config hot-reload, and per-category `sort_keys`/`gear_groups` -- added
+    by request.** Before this, a magic/superior/normal-quality gear item
+    (anything that wasn't unique or rare) matched no category at all: it
+    wasn't moved, wasn't counted in `itemsSorted`, and wasn't mentioned in
+    the plan log -- it just silently stayed wherever it started. Two
+    changes close that gap. First, three new modes --
+    `magicGear`/`superiorGear`/`normalGear` -- cover those three quality
+    tiers the same way `uniqueGear`/`rareGear` already covered theirs.
+    Second, a new `unclassified` mode is a dynamic catch-all: unlike every
+    other mode, its match predicate isn't a fixed quality/type check --
+    `RunAutoSort` computes it fresh on every call as "every item not
+    claimed by any *other* mode actually present in this layout" (see
+    `Mode::catchAll`/`streamMatches` in `sort_engine.cpp`). This also means
+    removing any category from `[[layout]]` entirely (e.g. commenting out
+    `rareGear`) no longer strands its items -- they simply fall through to
+    `unclassified` instead, with no special-casing needed per category.
+    `unclassified` is meant to go last in the layout so it never steals
+    tabs from a real category ahead of it.
+
+    On top of the new categories, every category's sort order is now
+    config-driven instead of a hardcoded per-mode comparator: a
+    `CategorySpec::sortKeys` list of named keys (`reqLevel`, `ilvl`, `name`,
+    `quality` everywhere; `gearGroup`/`handTier` for gear categories;
+    `setName`/`itemName` for `set`; `size` for the two charm categories),
+    each optionally prefixed `-` for descending, resolved into a
+    `CompoundKey` and compared field by field (`ResolveKeyField`/
+    `BuildSortKey`/`CompoundKeyLess` in `sort_engine.cpp`). A gear category
+    can also override `gear_groups`, its own priority order for the 23
+    slot/weapon-type buckets the `gearGroup` key uses
+    (`BuildGearGroupPriority`). Leaving either field unset falls back to
+    that mode's own `defaultSortKeys`/the default bucket order, chosen to
+    reproduce this plugin's original hardcoded ordering exactly -- so an
+    existing config with no `sort_keys`/`gear_groups` at all sorts
+    identically to before this change.
+
+    Finally, `DoAutoSort` now re-runs `LoadConfig` at the top of every Auto
+    Sort call and refreshes `g_config`'s tab count, layout (including every
+    category's `sort_keys`/`gear_groups`), `start_tab`,
+    `blank_tabs_at_start`, `compact_empty_tabs_first`, and
+    `add_empty_page_when` from the fresh read -- only `enabled`,
+    `debug_log_ui_messages`, and `[grid]` stay fixed at their plugin-load-
+    time values, since those three need a game restart to take effect. So
+    editing the config and clicking Auto Sort again is now enough to see a
+    layout/sort-order change, no restart required.
+
+    Validated with `test_new_features.cpp` (25 scenario assertions:
+    catch-all coverage when a category is removed from the layout,
+    catch-all not stealing from a real category ahead of it, `gear_groups`
+    reordering actually changing placement order, a `sort_keys` override
+    actually changing ordering vs. the built-in default, and the atomic
+    `set` mode's `setName`/`reqLevel`/`-ilvl`/`itemName` group-and-item
+    ordering in both directions) and by re-running a real 3450-item shared
+    stash (extracted from an actual `.d2i` save) through the new engine: it
+    now places all 3450 items (previously 5 magic/superior/normal-quality
+    gear items had no category and were silently excluded from the plan),
+    with zero collisions in `DetectCollisions`'s self-check.
 
 ## Testing
 

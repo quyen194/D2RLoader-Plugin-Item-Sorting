@@ -87,6 +87,20 @@ struct CategorySpec {
 	uint32_t       minTabs = 0;
 	bool           hasEmptyPageOverride = false; // false = inherit AutoSortConfig::addEmptyPageWhen
 	EmptyPageRule  emptyPageOverride;
+
+	// This category's sort order, most-significant key first; a "-" prefix on
+	// a key name means descending. Empty = use this mode's own built-in
+	// default (see sort_engine.cpp's BuiltinModes -- every mode ships a
+	// default list that reproduces this plugin's original, pre-config-driven
+	// ordering exactly, so an empty list here is never "unsorted").
+	std::vector<std::string> sortKeys;
+
+	// Gear categories only: this category's own priority order for the
+	// "gearGroup" sort key, as a list of the 23 slot/weapon-type keys (see
+	// GearSlot / the config file's own comment for the full key list). A key
+	// left out keeps its default relative position, behind every key that IS
+	// listed. Empty = the default (GearSlot's own declaration order).
+	std::vector<std::string> gearGroups;
 };
 
 // One category's placement in the tab sequence, filled in by RunAutoSort for

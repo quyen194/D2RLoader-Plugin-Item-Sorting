@@ -1,111 +1,261 @@
 # Default configuration for the Remote Stash Sorting plugin.
 # D2RLoader creates <scope>/d2rloader/config/remote-stash-sorting.toml from
 # this file the first time the plugin loads; it never overwrites a config
-# the user has already edited.
+# you've already edited.
 
 [remote-stash-sorting]
 enabled = true
 
-# The SDK has no query for "how many active/normal shared-stash tabs exist"
-# (see README "Known gaps"), so this must be set by hand to match your
-# actual shared stash. Auto Sort fails cleanly (with a toast + log message)
-# rather than guessing if this is too low; it is harmless to set it a bit
-# higher than the real count.
+# The SDK has no way to query how many active shared-stash tabs you have, so
+# this must be set by hand to match your actual shared stash. Auto Sort
+# fails cleanly (toast + log message) rather than guessing if this is too
+# low; it is harmless to set it a bit higher than your real tab count.
 shared_stash_tab_count = 200
 
-# Reserved leading tabs that Auto Sort and the padding pass never touch
-# (e.g. tabs you manage by hand). Mirrors the save-editor's startTab.
+# Reserved leading tabs that Auto Sort and the padding pass never touch --
+# useful if you keep a few tabs at the front you manage by hand and don't
+# want the plugin to ever rearrange.
 start_tab = 0
 
-# After sorting + category padding, pull this many empty tabs to the front
-# of the active range (right after start_tab). Mirrors blankTabsAtStart /
-# _ssAddBlankTabsAtStart. Set to 0 to disable.
+# After sorting, pull this many empty tabs up to sit right after
+# start_tab, so you always have a few blank tabs handy at the front
+# without having to hunt for them. Set to 0 to disable.
 blank_tabs_at_start = 3
 
-# Before sorting, relabel already-empty tabs (within the active range) to
-# the end of that range so Auto Sort has a clean run of empty tabs to fill
-# from. Mirrors compactEmptyTabsFirst / _ssCompactEmptyTabsToEnd. Leave
-# true unless you have a reason to preserve empty-tab positions as-is.
+# Before sorting, relabel already-empty tabs (within the active range) so
+# they all end up at the end of that range -- this gives Auto Sort a clean,
+# contiguous run of empty tabs to fill from instead of scattered gaps.
+# Leave true unless you have a specific reason to keep empty tabs exactly
+# where they currently are.
 compact_empty_tabs_first = true
 
-# After each category finishes, add one extra "breathing" blank tab once
-# that category's last used tab is at least this % full. Accepts "never",
-# "always", or a number 0-100. Mirrors addEmptyPageWhen / _ssWantsEmptyPage.
-# Overridable per category below.
-add_empty_page_when = 30
+# Global default for the per-category add_empty_page_when below -- only
+# used by a category that doesn't set its own. Every category in this file
+# already sets its own value, so this is effectively unused as shipped;
+# it only matters if you add a new [[layout]] entry without one.
+# Accepts "never", "always", or a number 0-100 (see the per-category
+# explanation below).
+add_empty_page_when = "never"
 
 # Notification style after Auto Sort / Add Blank Page / Remove Current Page
-# finish. v1 always shows the plugin's own toast panel with a Close button
-# (the WidgetService has no way to push fresh text into an already-open
-# widget, so there is no auto-dismiss timer yet -- see README). Exact item
-# and tab counts go to the plugin's log file, not the toast.
+# finish. The only accepted value right now is "toast", which shows the
+# plugin's own toast panel with a Close button. Exact item and tab counts
+# always go to the plugin's log file, regardless of this setting.
 notification_channel = "toast"
 notification_seconds = 4 # reserved for a future auto-dismiss timer; unused in v1
 
 # Debug aid only -- leave false normally. When true, every UI message the
-# plugin's listener sees (ours, other plugins', and D2R's own native
+# plugin's listener sees (ours, other plugins', and the game's own native
 # panel/button messages) is written to the plugin log as target/command/text.
-# Turn this on, open/close/switch tabs on the Shared Stash in-game, then check
-# the log to find the exact native message D2R fires for those actions (there
-# is no documented list of them -- see README "Known gaps" #8). This is a
-# firehose (fires on almost every UI click), so turn it back off once done.
+# Turn this on, open/close/switch tabs on the Shared Stash in-game, then
+# check the log to find the exact native message the game fires for those
+# actions. This is a firehose (fires on almost every UI click), so turn it
+# back off once you're done.
 debug_log_ui_messages = false
 
-# Grid size per shared-stash tab. 16x13 is confirmed from the
-# D2R-Reimagined-Save-Editor's renderSharedStashTabs; override here only if
-# live testing finds a mismatch for your game version.
+# ── What reloads when, without restarting the game ─────────────────────────
+# Auto Sort re-reads this whole file from disk every time you run it, EXCEPT
+# for three settings that only take effect at plugin load time and therefore
+# need a game restart to pick up a change: `enabled`, `debug_log_ui_messages`,
+# and [remote-stash-sorting.grid] below. Every other setting in this file --
+# shared_stash_tab_count, start_tab, blank_tabs_at_start,
+# compact_empty_tabs_first, add_empty_page_when, and the entire [[layout]]
+# list including each entry's min_tabs / add_empty_page_when / sort_keys /
+# gear_groups -- can be edited and takes effect on the very next Auto Sort
+# run, no restart needed.
+
+# Grid size per shared-stash tab, in cells. 16x13 is the confirmed size for
+# the game's shared stash; only override this if live testing finds a
+# mismatch for your game version. Needs a game restart to take effect --
+# see the reload note above.
 [remote-stash-sorting.grid]
 width = 16
 height = 13
 
-# Auto-sort layout: one entry per category, in the order tabs are filled.
-# Mirrors SS_AUTO_LAYOUT from the save-editor 1:1. mode_id must match an id
-# sort_engine.cpp knows about (see DefaultLayout()/kBuiltinModes).
+# ── Auto-sort layout ────────────────────────────────────────────────────
+# One entry per category, in the order tabs are filled -- the first entry's
+# category claims the first tab(s), the next entry starts right after it,
+# and so on. If you remove an entry from this list entirely, the items it
+# would have matched don't disappear -- they fall through to "unclassified"
+# instead, same as any other item this file doesn't give a dedicated
+# category to.
+#
+# Every [[layout]] entry accepts:
+#
+#   mode_id              -- required. One of: set, uniqueGear, uniqueRingAmu,
+#                            rareRingAmu, magicRingAmu, uniqueCharm,
+#                            magicCharm, uniqueJewel, rareMagicJewel,
+#                            rareGear, magicGear, superiorGear, normalGear,
+#                            unclassified.
+#
+#   min_tabs              -- reserved tabs before this category starts
+#                            borrowing more from the rest of the stash;
+#                            0 = borrow-only, no fixed reservation.
+#
+#   add_empty_page_when   -- "never", "always", or a number 0-100. Adds one
+#                            extra blank "breathing" tab right after this
+#                            category's run once its last used tab is at
+#                            least this full (a number), always (regardless
+#                            of fill), or never.
+#
+#   sort_keys              -- this category's sort order. A list of key
+#                            names, most significant first; prefix a name
+#                            with "-" to sort that key descending instead
+#                            of ascending.
+#
+#                            Keys accepted by every category:
+#                              "reqLevel"  -- required level to equip/use
+#                              "ilvl"      -- item level
+#                              "name"      -- base item name, alphabetical
+#                              "quality"   -- coarse tie-break: a crafted item
+#                                             sorts just ahead of a unique one;
+#                                             every other quality ties under
+#                                             this key. Mainly useful in a
+#                                             mixed-quality category (like
+#                                             uniqueGear, or unclassified).
+#
+#                            Keys accepted only by gear categories
+#                            (uniqueGear, rareGear, magicGear, superiorGear,
+#                            normalGear, unclassified):
+#                              "gearGroup" -- slot/weapon-type bucket, in
+#                                             the order that category's own
+#                                             gear_groups (below) lists
+#                              "handTier"  -- armor first, then one-handed
+#                                             weapons, then two-handed
+#
+#                            Keys accepted only by "set":
+#                              "setName"   -- alphabetical by the set's own
+#                                             name; whole sets still stay
+#                                             grouped together as one block
+#                              "itemName"  -- within one set, alphabetical
+#                                             by each piece's own item name
+#
+#                            Keys accepted only by "uniqueCharm" /
+#                            "magicCharm":
+#                              "size"      -- charm grid size (small/large/
+#                                             grand); "-size" = grand first
+#
+#   gear_groups            -- gear categories only (uniqueGear, rareGear,
+#                            magicGear, superiorGear, normalGear,
+#                            unclassified). The order the "gearGroup" sort
+#                            key above uses for THIS category -- each gear
+#                            category can have its own order. List all 23
+#                            keys in whatever order you want; a key you
+#                            leave out falls back to its default position,
+#                            behind every key you did list.
+#                            Full list of 23 keys: helm, tors, belt, glov,
+#                            boot, shld, axe, swor, knif, blun, scep, wand,
+#                            staf, orb, spea, pole, jave, bow, bowq, xbow,
+#                            xboq, h2h, weap.
+#                            (bowq = Arrows, stays right after bow; xboq =
+#                            Bolts, stays right after xbow -- unless you
+#                            explicitly split them apart in your own list.)
+
 [[remote-stash-sorting.layout]]
 mode_id = "uniqueGear"
 min_tabs = 5
+add_empty_page_when = "never"
+gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "knif", "blun", "scep", "wand", "staf", "orb", "spea", "pole", "jave", "bow", "bowq", "xbow", "xboq", "h2h", "weap"]
+sort_keys = ["handTier", "gearGroup", "quality", "reqLevel", "-ilvl", "name"]
 
 [[remote-stash-sorting.layout]]
 mode_id = "uniqueRingAmu"
 min_tabs = 1
+add_empty_page_when = "never"
+sort_keys = ["quality", "reqLevel", "-ilvl", "name"]
 
 [[remote-stash-sorting.layout]]
 mode_id = "rareRingAmu"
 min_tabs = 1
+add_empty_page_when = "never"
+sort_keys = ["reqLevel", "-ilvl", "name"]
 
 [[remote-stash-sorting.layout]]
 mode_id = "magicRingAmu"
 min_tabs = 1
+add_empty_page_when = "never"
+sort_keys = ["reqLevel", "-ilvl", "name"]
 
 [[remote-stash-sorting.layout]]
 mode_id = "uniqueCharm"
 min_tabs = 1
+add_empty_page_when = "never"
+sort_keys = ["-size", "quality", "reqLevel", "-ilvl", "name"]
 
 [[remote-stash-sorting.layout]]
 mode_id = "magicCharm"
 min_tabs = 2
+add_empty_page_when = "never"
+sort_keys = ["-size", "reqLevel", "-ilvl", "name"]
 
 [[remote-stash-sorting.layout]]
 mode_id = "uniqueJewel"
 min_tabs = 1
+add_empty_page_when = "never"
+sort_keys = ["quality", "reqLevel", "-ilvl", "name"]
 
 [[remote-stash-sorting.layout]]
 mode_id = "rareMagicJewel"
 min_tabs = 1
+add_empty_page_when = "never"
+sort_keys = ["reqLevel", "-ilvl", "name"]
 
 [[remote-stash-sorting.layout]]
 mode_id = "set"
 min_tabs = 6
-# Reference default: always add a breathing page after Set gear (its tabs
-# tend to fill unevenly since full sets are rare).
+# Always add a breathing page after Set gear -- its tabs tend to fill
+# unevenly since full sets are rare.
 add_empty_page_when = "always"
+sort_keys = ["setName", "reqLevel", "-ilvl", "itemName"]
 
 [[remote-stash-sorting.layout]]
 mode_id = "rareGear"
 min_tabs = 1
-# Reference default: never add a breathing page after Rare gear (it's
-# usually the last/overflow category, so padding it just wastes tabs).
+# Never add a breathing page after Rare gear -- with the quality-tier gear
+# categories below it, it's no longer the last category by default, but it
+# can still be the largest, so padding it is still just wasted tabs.
 add_empty_page_when = "never"
+gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "knif", "blun", "scep", "wand", "staf", "orb", "spea", "pole", "jave", "bow", "bowq", "xbow", "xboq", "h2h", "weap"]
+sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
+
+# NEW -- Magic-quality gear. Before this category existed, a magic-quality
+# helm/weapon/etc had no dedicated category and fell all the way through to
+# "unclassified" below; now it gets its own tab(s) like every other quality
+# tier already had.
+[[remote-stash-sorting.layout]]
+mode_id = "magicGear"
+min_tabs = 1
+add_empty_page_when = "never"
+gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "knif", "blun", "scep", "wand", "staf", "orb", "spea", "pole", "jave", "bow", "bowq", "xbow", "xboq", "h2h", "weap"]
+sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
+
+# NEW -- Superior-quality gear (same idea as magicGear above, one tier down).
+[[remote-stash-sorting.layout]]
+mode_id = "superiorGear"
+min_tabs = 1
+add_empty_page_when = "never"
+gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "knif", "blun", "scep", "wand", "staf", "orb", "spea", "pole", "jave", "bow", "bowq", "xbow", "xboq", "h2h", "weap"]
+sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
+
+# NEW -- Normal/white-quality gear (same idea, the plain base-item tier).
+[[remote-stash-sorting.layout]]
+mode_id = "normalGear"
+min_tabs = 1
+add_empty_page_when = "never"
+gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "knif", "blun", "scep", "wand", "staf", "orb", "spea", "pole", "jave", "bow", "bowq", "xbow", "xboq", "h2h", "weap"]
+sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
+
+# Catches every item that doesn't match any other category actually present
+# in this layout list above -- including a category you've removed
+# entirely, and anything this plugin doesn't classify at all (quest items,
+# keys, potions, etc). Placed last so it never steals tabs from a real
+# category ahead of it.
+[[remote-stash-sorting.layout]]
+mode_id = "unclassified"
+min_tabs = 1
+add_empty_page_when = "never"
+gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "knif", "blun", "scep", "wand", "staf", "orb", "spea", "pole", "jave", "bow", "bowq", "xbow", "xboq", "h2h", "weap"]
+sort_keys = ["quality", "reqLevel", "name"]
 
 # This plugin only rearranges the local player's own shared stash, so its
 # settings do not affect other players and are not listed under [d2rl].
