@@ -331,10 +331,43 @@ here for review, same as the algorithm-level scope note below.
    real tab apart from one that simply doesn't exist, since both look
    identical from here (nothing ever appears there) -- but that turned out
    to be wrong: the player confirmed tab 79 is a real tab in their 200-tab
-   stash. **Root cause not yet found.** Whatever it is, it's isolated to
-   those two specific tab numbers, and thanks to "Known gaps" #15's
-   per-item isolation it doesn't affect anything else in the plan -- the
-   other 3543 operations commit normally regardless.
+   stash.
+
+   **Leading hypothesis (pending direct confirmation): this has nothing to
+   do with the destination tab at all.** Replaying the exact same
+   classification table and config offline, against a real export of the
+   player's stash parsed with the save-editor's own item logic (not a
+   guess), reproduces the live log's category placement almost exactly --
+   every category's tab range and item count matches to within a couple of
+   items. Under that replay, tabs 78/79 turn out to be nothing more than
+   wherever the "unclassified" catch-all category (`Mode::catchAll` in
+   `RunAutoSort`, which claims every item no other category's stream
+   matches -- gems, runes, potions, quest items, and anything
+   `Classification::Classify` doesn't recognize) landed after the
+   padding/blank-tab shift. In both the original 3616-item run and a
+   second live run after the player littered a health/mana potion into
+   every tab as a test, 100% of the items whose planned destination fell
+   in that catch-all tab -- and nothing else -- were exactly this kind of
+   item: gems, runes, essence/quest items (Baal's Eye, Diablo's Horn,
+   Mephisto's Brain/Animus, Worldstone Shards, Keys of
+   Terror/Destruction/Hate, and similar), and the test potions themselves.
+   Ordinary gear, charms, jewels, rings, and amulets were never among the
+   rejected items in either run. This points at something the live
+   `ExistingItemTransaction` Move call does not support for
+   Misc.txt-classified items specifically, independent of where they're
+   being sent -- not a tab validity problem at all.
+
+   **Not yet fully confirmed**, because the live log only ever recorded a
+   handle and a result code, not what kind of item it was. This session
+   added the item's code and category to that rejection log itself
+   (`ApplyMoves`' per-operation log line, `plugin.cpp`) so the next real
+   run either confirms this outright or rules it out. If confirmed, this
+   is very likely a live-game/SDK limitation on moving these item types via
+   `ExistingItemTransaction`, not something fixable in this plugin --
+   though thanks to "Known gaps" #15's per-item isolation it already
+   degrades as gracefully as this class of problem can: a handful of
+   individually-logged, isolated rejections, with the rest of the plan
+   committing normally.
 
 4. **No SDK query for "which tab is currently displayed."** Worked around
    with a plugin-tracked "selected tab" pointer (starts at 0, moved with the
@@ -812,15 +845,19 @@ here for review, same as the algorithm-level scope note below.
     against: committed went from `1849/3616` to `3543/3616`, and every
     `Result::Conflict` rejection is gone -- the fix above works as designed.
     The remaining 73 rejections were a *different*, narrower problem (100%
-    `Result::Unsupported`, concentrated entirely in tabs 78 and 79, both
-    beyond the 76 tabs the category sort itself used) that is still under
-    investigation -- see "Known gaps" #3; it is not a `shared_stash_tab_
-    count` misconfiguration; the player confirmed their real tab count
-    genuinely covers both tabs. It's still a good demonstration of this
-    item's fix working exactly as intended even for a failure it wasn't
-    built for: the 73 bad operations were isolated and individually
-    logged, and every other operation in the same plan still committed
-    normally.
+    `Result::Unsupported`) that first looked tab-related -- concentrated
+    entirely in tabs 78 and 79 -- but is not a `shared_stash_tab_count`
+    misconfiguration (the player confirmed their real tab count genuinely
+    covers both tabs). Per "Known gaps" #3, the leading hypothesis now is
+    that it is about the ITEM being moved, not the destination: gems,
+    runes, quest items, and potions are the only things the
+    "unclassified" catch-all category ever sends to those tabs, and are
+    the only items rejected in either live run so far -- pending direct
+    confirmation from an enhanced rejection log added this session. It's
+    still a good demonstration of this item's fix working exactly as
+    intended even for a failure it wasn't built for: the 73 bad operations
+    were isolated and individually logged, and every other operation in
+    the same plan still committed normally.
 
 ## Testing
 

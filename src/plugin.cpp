@@ -31,6 +31,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace D2RL;
@@ -412,8 +413,31 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 
 // --- Turning a plan into an item transaction --------------------------------
 
-auto ApplyMoves(const PluginContext* ctx, PlayerHandle player, const RemoteStashSorting::SequencedMoves& sequenced, uint32_t* committedCount)
-	-> Items::Result {
+// Unpacks a D2RL::Items::MakeItemCode-style packed code back into up to 4
+// printable characters (space-padded codes trim their trailing spaces), for
+// diagnostic logging only -- see the rejection log below. Added after an
+// offline replay of a live run's data (same classification table, same
+// config) pointed at a pattern worth confirming directly: every rejection
+// so far has landed on an item the "unclassified" catch-all category placed
+// (a potion, gem, rune, or quest item -- see README "Known gaps" #3), never
+// on ordinary gear/charm/jewel/ring/amulet. This line is what the next real
+// run needs to confirm or rule that out for good, instead of inferring it
+// from tab numbers after the fact.
+std::string UnpackItemCode(uint32_t packedCode) {
+	char text[5] {};
+	for (int i = 0; i < 4; ++i) {
+		text[i] = static_cast<char>((packedCode >> (8 * i)) & 0xFF);
+	}
+	std::string result(text);
+	while (!result.empty() && result.back() == ' ') {
+		result.pop_back();
+	}
+	return result;
+}
+
+auto ApplyMoves(
+	const PluginContext* ctx, PlayerHandle player, const RemoteStashSorting::SequencedMoves& sequenced,
+	const std::vector<RemoteStashSorting::ItemFacts>& items, uint32_t* committedCount) -> Items::Result {
 	if (committedCount != nullptr) {
 		*committedCount = 0;
 	}
@@ -421,6 +445,12 @@ auto ApplyMoves(const PluginContext* ctx, PlayerHandle player, const RemoteStash
 	if (moves.empty()) {
 		return Items::Result::Success;
 	}
+
+	// Handle -> facts, purely for the rejection log below (what code/category
+	// was this?) -- never consulted for planning, which already happened.
+	std::unordered_map<uint64_t, const RemoteStashSorting::ItemFacts*> factsByHandle;
+	factsByHandle.reserve(items.size());
+	for (const auto& it : items) factsByHandle.emplace(it.handle, &it);
 
 	for (const auto& note : sequenced.diagnostics) {
 		const std::string msg = "remote-stash-sorting: move ordering: " + note;
@@ -494,13 +524,39 @@ auto ApplyMoves(const PluginContext* ctx, PlayerHandle player, const RemoteStash
 
 		if (end - begin == 1) {
 			const auto& op = ops[begin];
-			char        msg[256];
+
+			// What kind of item was this? (code/category, not just a bare
+			// handle) -- added after a live run's rejections turned out to
+			// cluster entirely on Misc.txt-classified items (potions, gems,
+			// runes, quest items) landing in the "unclassified" catch-all
+			// category, not on anything about the destination tab. See
+			// README "Known gaps" #3.
+			std::string category = "?";
+			std::string codeText;
+			auto        factIt = factsByHandle.find(static_cast<uint64_t>(op.item));
+			if (factIt != factsByHandle.end()) {
+				const auto* fact = factIt->second;
+				codeText          = UnpackItemCode(fact->code);
+				if (fact->isGear) {
+					category = "gear(slot=" + std::to_string(static_cast<int>(fact->gearSlot)) + ")";
+				} else {
+					switch (fact->nonGearKind) {
+						case RemoteStashSorting::NonGearKind::Charm: category = "charm"; break;
+						case RemoteStashSorting::NonGearKind::Jewel: category = "jewel"; break;
+						case RemoteStashSorting::NonGearKind::Ring: category = "ring"; break;
+						case RemoteStashSorting::NonGearKind::Amulet: category = "amulet"; break;
+						default: category = "unclassified(misc/gem/rune/quest/potion)"; break;
+					}
+				}
+			}
+
+			char msg[384];
 			std::snprintf(
 				msg, sizeof(msg),
-				"remote-stash-sorting: move for item handle %llu -> tab %u (%u,%u) was rejected (result %u); skipping "
-				"just this item, the rest of the plan is unaffected.",
-				static_cast<unsigned long long>(op.item), op.move.destination.sharedStashPage, op.move.destination.x,
-				op.move.destination.y, static_cast<unsigned>(txnResult));
+				"remote-stash-sorting: move for item handle %llu (code='%s', %s) -> tab %u (%u,%u) was rejected (result "
+				"%u); skipping just this item, the rest of the plan is unaffected.",
+				static_cast<unsigned long long>(op.item), codeText.c_str(), category.c_str(), op.move.destination.sharedStashPage,
+				op.move.destination.x, op.move.destination.y, static_cast<unsigned>(txnResult));
 			ctx->LogWarn(msg);
 			return;
 		}
@@ -721,7 +777,7 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 		RemoteStashSorting::SequenceMovesForLiveApply(state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight);
 
 	uint32_t   committed = 0;
-	const auto txnResult = ApplyMoves(ctx, player, sequenced, &committed);
+	const auto txnResult = ApplyMoves(ctx, player, sequenced, state.facts, &committed);
 
 	char logMsg[320] {};
 	std::snprintf(
@@ -777,7 +833,7 @@ void __cdecl DoAddBlankPage(const PluginContext* ctx, void*) noexcept {
 		RemoteStashSorting::SequenceMovesForLiveApply(state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight);
 
 	uint32_t   committed = 0;
-	const auto txnResult = ApplyMoves(ctx, player, sequenced, &committed);
+	const auto txnResult = ApplyMoves(ctx, player, sequenced, state.facts, &committed);
 	if (txnResult == Items::Result::NotAuthoritative) {
 		QueueToast(ctx, UiLayouts::OutcomeMessage::MultiplayerClientUnsupported);
 		return;
@@ -819,7 +875,7 @@ void __cdecl DoRemoveCurrentPage(const PluginContext* ctx, void*) noexcept {
 		RemoteStashSorting::SequenceMovesForLiveApply(state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight);
 
 	uint32_t   committed = 0;
-	const auto txnResult = ApplyMoves(ctx, player, sequenced, &committed);
+	const auto txnResult = ApplyMoves(ctx, player, sequenced, state.facts, &committed);
 	if (txnResult == Items::Result::NotAuthoritative) {
 		QueueToast(ctx, UiLayouts::OutcomeMessage::MultiplayerClientUnsupported);
 		return;
