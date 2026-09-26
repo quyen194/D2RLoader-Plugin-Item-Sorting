@@ -235,14 +235,42 @@ struct SequencedMoves {
 	// (see plugin.cpp's ApplyMoves), not something this ordering makes for
 	// it.
 	std::vector<uint32_t> layerSizes;
+
+	// Parallel to `moves` (same size, same order): true for a synthetic
+	// "move to scratch cell" this function inserted to break a dependency
+	// cycle (see the cycle-break comment above `moves`), false for an
+	// item's real, planned destination. A caller logging a rejected move
+	// should say which this was -- a live report of `Result::Unsupported`
+	// rejections clustering on a handful of specific, otherwise-untouched
+	// tab numbers turned out to be exactly this: FindScratchCell (see the
+	// .cpp) picks the first free cell starting from tab 0, but a busy stash
+	// can easily have no free cell left anywhere in the tabs the plan
+	// itself actually uses, spilling scratch picks into tabs past that --
+	// tabs the plan never places a single real item into, and (unconfirmed,
+	// see README "Known gaps" #3/#8) possibly not "materialized" for a live
+	// Move if the player has never opened them either. This flag is what
+	// lets that be told apart, in the log, from a real placement failing.
+	std::vector<bool> isScratchMove;
 };
 
+// preferredMaxTab (optional; kUnknownTab means "no preference") biases
+// FindScratchCell (see the .cpp) to look for a scratch cell within
+// [0, preferredMaxTab) first, falling back to the rest of [0, tabCount) only
+// if that narrower range has nothing free -- it never makes a scratch pick
+// fail that would otherwise succeed. Pass the caller's own already-known
+// "real" active tab count (e.g. AutoSortPlan::tabsUsed) here: those tabs are
+// proven safe for a live Move (the plan just placed real items there), while
+// tabs beyond them (padding the stash has but Auto Sort never touches) are
+// the ones a scratch pick would otherwise land in by default -- see
+// isScratchMove's own comment for why that specifically has caused live
+// rejections.
 SequencedMoves SequenceMovesForLiveApply(
 	const std::vector<ItemFacts>&   items,
 	const std::vector<PlannedMove>& moves,
 	uint32_t                        tabCount,
-	uint32_t                        gridWidth  = 16,
-	uint32_t                        gridHeight = 13);
+	uint32_t                        gridWidth       = 16,
+	uint32_t                        gridHeight      = 13,
+	uint32_t                        preferredMaxTab = kUnknownTab);
 
 // "Add blank page": slide the nearest empty tab at or after `afterTab` so it
 // lands immediately after `afterTab`, by shifting every tab in between back

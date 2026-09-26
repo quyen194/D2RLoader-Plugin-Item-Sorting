@@ -406,20 +406,57 @@ here for review, same as the algorithm-level scope note below.
    it never reproduces a shortfall. The planning/bin-packing logic is not
    the problem.
 
-   **Leading hypothesis now:** something specific to the *live application*
-   of moves into these particular borrowed/padded-in tabs -- most likely
-   that a tab reached only by borrowing (never visited by the player or
-   "opened" in the live UI) isn't fully backed/materialized on the game's
-   side yet, so `ExistingItemTransaction` rejects a Move *into* it with
-   `Unsupported` regardless of what the offline simulation thinks is free
-   there. This is a cheap, concrete thing to test directly: before running
-   Auto Sort, scroll through and visit every shared-stash tab at least once
-   in-game (especially the last few, highest-numbered ones), then run Auto
-   Sort again and see whether the same 73-ish items still get rejected. If
-   visiting the tabs first makes the rejections disappear, this is a
-   real live-only tab-materialization quirk (workaroundable, e.g. by having
-   the plugin itself "touch"/select each destination tab before moving
-   items into it); if they still fail, the cause is something else again.
+   **Leading hypothesis, then narrowed further.** The rejections were
+   originally assumed to be the *category plan's own* real destinations
+   landing in a borrowed/padded-in tab the player had never visited. A
+   later run's log told a more precise story: the plan's own real
+   footprint (every category's actual placement) fit entirely within tabs
+   `[0, tabsUsed)` (`outcome.tabsUsed`, printed in the "auto sort placed ...
+   across N tab(s)" line) -- but the specific rejected moves targeted tab
+   numbers a couple past that, tabs the plan itself never placed a single
+   real item into. That points at `SequenceMovesForLiveApply`'s dependency-
+   cycle breaker instead (`sort_engine.cpp`; see `SequencedMoves::
+   isScratchMove`'s own doc comment): to unblock a cycle (A wants B's spot,
+   B wants A's spot -- common in a full reshuffle), it temporarily parks one
+   member in a scratch cell, found by `FindScratchCell` scanning tabs
+   upward from 0 for the first free one. In a nearly-full stash, tabs the
+   plan's own categories actually use can have too little slack left over
+   for that search, so it spills into tabs beyond the plan's real footprint
+   -- bare `shared_stash_tab_count` padding the plan never touches. If a
+   tab out that far turns out to be one the player has never opened (this
+   plugin's earlier hypothesis) -- or, more simply, one that doesn't
+   correspond to a real tab at all because `shared_stash_tab_count` is set
+   higher than the account's actual shared stash size (see this setting's
+   own note above: there's no SDK query to validate it) -- `Unsupported` is
+   exactly what a Move into it would get, and the scratch cell search had
+   no way to know either was the case; it just found the first cell that
+   LOOKED unoccupied.
+
+   **Fix:** `SequenceMovesForLiveApply`/`FindScratchCell` now take an
+   optional `preferredMaxTab` (plugin.cpp passes `outcome.tabsUsed`) and
+   search `[0, preferredMaxTab)` -- tabs the plan itself just proved safe by
+   placing real items there -- before ever falling back to the padding
+   tail beyond it, which it still will if that narrower range genuinely has
+   no free cell (never makes an otherwise-possible scratch pick fail, just
+   reorders where it looks first). `ApplyMoves`'s rejection log also now
+   says outright when a rejected move was one of these synthetic scratch
+   hops rather than an item's real destination, so this no longer has to be
+   re-derived by eye from which tabs the rest of the plan touches. Validated
+   with a dedicated offline test: a stash packed so tightly that its own
+   footprint has zero free cells forces the exact fallback-to-padding path
+   this fix is meant to avoid taking unnecessarily, while a stash with even
+   one free cell left in its own footprint is confirmed to use that instead
+   of ever looking at the padding tail.
+
+   This narrows, but does not by itself prove, the remaining open question:
+   whether a genuinely never-opened (but real) tab actually is unsupported
+   for a live Move, or whether these particular rejections were simply
+   `shared_stash_tab_count` set higher than the real tab count all along. If
+   you're seeing this warning, checking that setting against your actual
+   shared stash size (see "Config" above) is worth doing before assuming
+   the deeper, unconfirmed live-API quirk -- and if rejections do still
+   occur, the log will now say plainly whether they're this scratch-cell
+   case or something else.
 
    Either way, thanks to "Known gaps" #15's per-item isolation this already
    degrades as gracefully as this class of problem can: a handful of

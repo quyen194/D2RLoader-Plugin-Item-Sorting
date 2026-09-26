@@ -1025,9 +1025,19 @@ namespace {
 // sequencing run: not occupied by anything live right now (per `live`) and
 // not any move's own planned destination (per `reserved`) -- see
 // SequenceMovesForLiveApply's header comment. Scans tabs in ascending order,
-// row-major within a tab; a real Auto Sort plan leaves plenty of untouched
-// slack (padding/blank tabs, `tabCount` set a bit above the real stash size)
-// so this is expected to succeed on the first tab or two it looks at.
+// row-major within a tab.
+//
+// Tries [0, preferredMaxTab) first, then -- only if that range has nothing
+// free -- falls back to [preferredMaxTab, tabCount). A live report traced a
+// cluster of `Result::Unsupported` move rejections to exactly the "falls
+// back" case: a busy stash can genuinely have no free cell left anywhere in
+// the tabs the plan's own categories use, so a plain single-range scan
+// starting at 0 ends up spilling into tabs the plan never places a single
+// real item into (bare padding `tabCount` leaves above the real stash size)
+// -- see SequencedMoves::isScratchMove's comment for why landing there
+// specifically causes live rejections. Preferring the plan's own known-safe
+// range first avoids that whenever there's room for it, which the common
+// case (a stash that isn't nearly 100% full) always has.
 std::optional<std::tuple<uint32_t, int32_t, int32_t>> FindScratchCell(
 	std::unordered_map<uint32_t, OwnerGrid>& live,
 	std::unordered_map<uint32_t, Occupancy>& reserved,
@@ -1035,28 +1045,35 @@ std::optional<std::tuple<uint32_t, int32_t, int32_t>> FindScratchCell(
 	uint32_t                                 gridWidth,
 	uint32_t                                 gridHeight,
 	uint32_t                                 iw,
-	uint32_t                                 ih) {
+	uint32_t                                 ih,
+	uint32_t                                 preferredMaxTab) {
 	if (iw == 0 || ih == 0 || iw > gridWidth || ih > gridHeight) return std::nullopt;
 
-	for (uint32_t tab = 0; tab < tabCount; ++tab) {
-		auto liveIt = live.find(tab);
-		auto resIt  = reserved.find(tab);
-		for (uint32_t y = 0; y + ih <= gridHeight; ++y) {
-			for (uint32_t x = 0; x + iw <= gridWidth; ++x) {
-				if (liveIt != live.end() && !liveIt->second.AllFree(static_cast<int32_t>(x), static_cast<int32_t>(y), iw, ih)) continue;
-				if (resIt != reserved.end() && !resIt->second.Free(static_cast<int32_t>(x), static_cast<int32_t>(y), iw, ih)) continue;
-				return std::make_tuple(tab, static_cast<int32_t>(x), static_cast<int32_t>(y));
+	auto scanRange = [&](uint32_t fromTab, uint32_t toTab) -> std::optional<std::tuple<uint32_t, int32_t, int32_t>> {
+		for (uint32_t tab = fromTab; tab < toTab; ++tab) {
+			auto liveIt = live.find(tab);
+			auto resIt  = reserved.find(tab);
+			for (uint32_t y = 0; y + ih <= gridHeight; ++y) {
+				for (uint32_t x = 0; x + iw <= gridWidth; ++x) {
+					if (liveIt != live.end() && !liveIt->second.AllFree(static_cast<int32_t>(x), static_cast<int32_t>(y), iw, ih)) continue;
+					if (resIt != reserved.end() && !resIt->second.Free(static_cast<int32_t>(x), static_cast<int32_t>(y), iw, ih)) continue;
+					return std::make_tuple(tab, static_cast<int32_t>(x), static_cast<int32_t>(y));
+				}
 			}
 		}
-	}
-	return std::nullopt;
+		return std::nullopt;
+	};
+
+	const uint32_t firstPassEnd = (std::min)(preferredMaxTab, tabCount);
+	if (auto found = scanRange(0, firstPassEnd)) return found;
+	return scanRange(firstPassEnd, tabCount);
 }
 
 } // namespace
 
 SequencedMoves SequenceMovesForLiveApply(
 	const std::vector<ItemFacts>& items, const std::vector<PlannedMove>& moves, uint32_t tabCount, uint32_t gridWidth,
-	uint32_t gridHeight) {
+	uint32_t gridHeight, uint32_t preferredMaxTab) {
 	SequencedMoves result;
 
 	std::unordered_map<uint64_t, const ItemFacts*> byHandle;
@@ -1197,7 +1214,7 @@ SequencedMoves SequenceMovesForLiveApply(
 				Node& n = nodes[h];
 				if (n.done || n.broken || n.inDegree == 0) continue;
 
-				auto scratch = FindScratchCell(liveByTab, reservedByTab, tabCount, gridWidth, gridHeight, n.w, n.h);
+				auto scratch = FindScratchCell(liveByTab, reservedByTab, tabCount, gridWidth, gridHeight, n.w, n.h, preferredMaxTab);
 				if (!scratch) {
 					// No free cell exists to break this cycle with (only
 					// expected in an almost entirely full stash, or a
@@ -1215,6 +1232,7 @@ SequencedMoves SequenceMovesForLiveApply(
 						+ " -- no free scratch cell found; sending its move as-is, it will likely be rejected live");
 					result.layerSizes.push_back(1);
 					result.moves.push_back(n.mv);
+					result.isScratchMove.push_back(false);
 					n.done = true;
 					++processed;
 					continue;
@@ -1242,7 +1260,10 @@ SequencedMoves SequenceMovesForLiveApply(
 
 			if (!scratchLayer.empty()) {
 				result.layerSizes.push_back(static_cast<uint32_t>(scratchLayer.size()));
-				for (uint64_t h : scratchLayer) result.moves.push_back(nodes[h].scratchMove);
+				for (uint64_t h : scratchLayer) {
+					result.moves.push_back(nodes[h].scratchMove);
+					result.isScratchMove.push_back(true);
+				}
 			}
 
 			if (currentLayer.empty() && processed == processedBefore) {
@@ -1264,6 +1285,7 @@ SequencedMoves SequenceMovesForLiveApply(
 				result.layerSizes.push_back(static_cast<uint32_t>(leftover.size()));
 				for (uint64_t h : leftover) {
 					result.moves.push_back(nodes[h].mv);
+					result.isScratchMove.push_back(false);
 					nodes[h].done = true;
 					++processed;
 				}
@@ -1277,6 +1299,7 @@ SequencedMoves SequenceMovesForLiveApply(
 			n.done  = true;
 			++processed;
 			result.moves.push_back(n.mv);
+			result.isScratchMove.push_back(false);
 			if (n.curTab != kUnknownTab) liveGrid(n.curTab).Clear(n.curX, n.curY, n.w, n.h);
 			liveGrid(n.mv.destTab).Mark(n.mv.destX, n.mv.destY, n.w, n.h, h);
 			n.curTab = n.mv.destTab;

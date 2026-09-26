@@ -626,13 +626,25 @@ auto ApplyMoves(
 				}
 			}
 
-			char msg[384];
+			// Is this a real destination, or a synthetic "move to scratch cell"
+			// this run's dependency-cycle break inserted (see
+			// SequencedMoves::isScratchMove)? A live report of rejections
+			// clustering on specific, otherwise-empty tab numbers turned out
+			// to be exactly the scratch-cell case -- distinguishing it here
+			// means the NEXT such report says so directly instead of needing
+			// to be re-derived from which tabs the rest of the plan touches.
+			const bool isScratch = begin < sequenced.isScratchMove.size() && sequenced.isScratchMove[begin];
+
+			char msg[512];
 			std::snprintf(
 				msg, sizeof(msg),
 				"remote-stash-sorting: move for item handle %llu (code='%s', %s) -> tab %u (%u,%u) was rejected (result "
-				"%u); skipping just this item, the rest of the plan is unaffected.",
+				"%u); skipping just this item, the rest of the plan is unaffected.%s",
 				static_cast<unsigned long long>(op.item), codeText.c_str(), category.c_str(), op.move.destination.sharedStashPage,
-				op.move.destination.x, op.move.destination.y, static_cast<unsigned>(txnResult));
+				op.move.destination.x, op.move.destination.y, static_cast<unsigned>(txnResult),
+				isScratch ? " [this was a temporary scratch-cell parking move to break a dependency cycle, not the item's real "
+							"destination -- see README Known gaps #3/#8]"
+						  : "");
 			ctx->LogWarn(msg);
 			return;
 		}
@@ -849,8 +861,14 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 	// the algorithm); ApplyMoves' own per-layer bisection stays as a backstop
 	// for anything this couldn't foresee (stale facts, a genuinely
 	// nonexistent tab, etc.), not the primary mechanism.
-	const auto sequenced =
-		RemoteStashSorting::SequenceMovesForLiveApply(state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight);
+	// preferredMaxTab = outcome.tabsUsed: bias any dependency-cycle scratch
+	// cell toward the tabs THIS plan actually places real items into, which
+	// are proven safe for a live Move (see SequencedMoves::isScratchMove's
+	// comment) -- rather than the bare `tabCount` padding above the real
+	// stash size, which a live report traced a cluster of Unsupported
+	// rejections back to.
+	const auto sequenced = RemoteStashSorting::SequenceMovesForLiveApply(
+		state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight, outcome.tabsUsed);
 
 	uint32_t   committed = 0;
 	const auto txnResult = ApplyMoves(ctx, player, sequenced, state.facts, &committed);
