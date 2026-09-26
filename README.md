@@ -370,36 +370,46 @@ here for review, same as the algorithm-level scope note below.
    individually-logged, isolated rejections, with the rest of the plan
    committing normally.
 
-   **Separate, unrelated bug found while chasing this one:** a Set-quality
-   item can sit forever in its original spot, untouched by Auto Sort, with
-   *no* rejection ever logged for it at all -- because it was never even
-   added to a category's plan in the first place. `plugin.cpp` only fills
-   `ItemFacts::setGroupName` (`CollectSharedStashItem`) via
-   `Classification::SetGroupForRow(item->qualityRecordId)`, and
+   **Separate bug found while chasing this one -- confirmed and fixed.** A
+   Set-quality item could sit forever in its original spot, untouched by
+   Auto Sort, with *no* rejection ever logged for it at all -- because it
+   was never even added to a category's plan in the first place.
+   `plugin.cpp` fills `ItemFacts::setGroupName` (`CollectSharedStashItem`)
+   via `Classification::SetGroupForRow(item->qualityRecordId)`, and
    `sort_engine.cpp`'s "set" category's `match()` requires that name to be
-   non-empty (see its own comment: an unresolved set item is deliberately
-   "treated the same as a completely unknown item" and left alone, on
-   purpose, to avoid planning a move for an item whose group is unknown).
-   A live report of exactly this -- a Grim Helm ("Natalya's Odium" per the
-   save-editor's own parse of the very same `.d2i` file, using its `setId`
-   field) sitting untouched at its original tab across a full Auto Sort run
+   non-empty (an unresolved set item is deliberately "treated the same as
+   a completely unknown item" and left alone, on purpose, rather than
+   moved into an unknown group). A live report of exactly this -- a Grim
+   Helm ("Natalya's Odium") sitting untouched across a full Auto Sort run
    that clearly ran the "set" category and placed hundreds of *other* set
-   items successfully -- confirms `SetGroupForRow` returned "" for this
-   item live, even though `item_classification_data.hpp`'s generated
-   `kSetGroupByRow` table does contain 4 rows for "Natalya's Odium" (rows
-   63-66, sourced from this same save-editor's bundled `setitems.txt`), so
-   the table isn't simply missing that set's name outright. Two rival
-   explanations, both untestable offline because `qualityRecordId` is a
-   live-SDK-internal value with no equivalent in a `.d2i` file: either the
-   live game's actual row numbering for `setitems.txt` has drifted from
-   the row order in this repo's bundled reference copy (e.g. the
-   Reimagined mod adding/reordering set rows elsewhere in the table shifts
-   every row after that point, including Natalya's), or `qualityRecordId`
-   itself means something subtly different than "this row, 1:1" for some
-   items. `CollectSharedStashItem` now logs the item's code and its raw
-   `qualityRecordId` whenever this lookup comes back empty, so the next
-   live run will show the actual number and let this be pinned down
-   precisely instead of guessed at.
+   items successfully -- came with the smoking gun once
+   `CollectSharedStashItem` was updated to log the raw `qualityRecordId`
+   on an empty lookup: **`qualityRecordId=62`**.
+
+   `base/setitems.txt` (the same file `gen_classification.py` reads to
+   build `kSetGroupByRow`) has exactly one fully-blank interior row --
+   both its `item` and `set` columns empty, a genuinely unused/reserved
+   row in Blizzard's own data, not a parsing artifact -- at raw row
+   position 62, immediately before "Natalya's Odium"'s 4 rows (63-66).
+   The old generator emitted a `""` placeholder for that row and still
+   counted it as a table slot, so every row from 63 onward sat exactly
+   one position "ahead of" where the live game -- which does not hand out
+   a `qualityRecordId` for a row with no actual item -- expects it.
+   `qualityRecordId=62` for a real "Natalya's Odium" item is exactly what
+   that off-by-one predicts.
+
+   Confirmed there is only one such fully-blank row in the whole 456-row
+   file, so the fix is narrow and low-risk: `gen_classification.py` now
+   skips emitting a slot at all for a fully-blank row instead of giving it
+   an empty placeholder slot, and `item_classification_data.hpp` has been
+   regenerated (`kSetGroupByRow` is now 455 entries; `kTable`, the item
+   classification table, is untouched). Every set from "Natalya's Odium"
+   onward -- including "Volf's Undead Legion" at what's now index
+   223-226 -- shifts down by exactly one row to line up with the live
+   game's numbering. `CollectSharedStashItem`'s diagnostic log (item code
+   + raw `qualityRecordId` whenever the lookup still comes back empty)
+   stays in place in case a different, still-unknown misalignment shows up
+   somewhere else in the table.
 
 4. **No SDK query for "which tab is currently displayed."** Worked around
    with a plugin-tracked "selected tab" pointer (starts at 0, moved with the

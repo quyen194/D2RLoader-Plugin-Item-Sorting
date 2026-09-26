@@ -98,7 +98,8 @@ for src in (weapons, armor, misc):
             h = 1
         SIZE_BY_CODE[code] = (max(1, w), max(1, h))
 
-# ---- setitems.txt: row position (0-based) -> raw 'set' column -------------
+# ---- setitems.txt: row position (0-based, skipping genuinely-unused rows)
+# -> raw 'set' column ---------------------------------------------------
 # D2RL::Items::ItemInfo.qualityRecordId is "a zero-based SetItems row" for
 # quality==Set items, i.e. exactly this row position (confirmed by the
 # save-editor's _buildSetItemCatalog comment: "Row position (idx) is the
@@ -107,11 +108,30 @@ for src in (weapons, armor, misc):
 # compared to itself (map grouping + alphabetical ordering in RunAutoSort's
 # atomic-set placement), never shown to the player, so no localization table
 # is needed here.
+#
+# CONFIRMED BUG (live report, 2026-09-26): setitems.txt's base data has
+# exactly one fully-blank interior row (both 'item' and 'set' empty -- a
+# genuinely unused/reserved slot in Blizzard's own data, not a parsing
+# artifact -- row 62 of 456 in this build's base/setitems.txt, immediately
+# before "Natalya's Odium"'s 4 rows). The live game does NOT hand out a
+# qualityRecordId for that unused row -- it counts only real, usable set-item
+# rows -- so every row from there on is one position *ahead* of this table's
+# old raw 1:1 file-row indexing. A live Grim Helm confirmed this exactly:
+# it reported qualityRecordId=62, which used to be this table's blank row,
+# one *before* the real "Natalya's Odium" entries (old index 63). Fix: skip
+# emitting a slot at all for a fully-blank row, instead of emitting "" and
+# still consuming a slot -- this keeps every later row's position aligned
+# with what the live game actually assigns. (If a *different* row somewhere
+# has only one of item/set set rather than both, that is a different,
+# unconfirmed case -- keep giving that row its own "" slot rather than
+# guessing it should be skipped too.)
 SET_GROUP_BY_ROW = []
 for row in setitems:
     item = (row.get("item") or "").strip()
     set_group = (row.get("set") or "").strip()
-    SET_GROUP_BY_ROW.append(set_group if item and set_group else "")
+    if not item and not set_group:
+        continue
+    SET_GROUP_BY_ROW.append(set_group if set_group else "")
 
 # ---- buildWeaponAndBeltMeta: IS_2HANDED ----
 IS_2HANDED = set()

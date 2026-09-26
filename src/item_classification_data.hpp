@@ -752,7 +752,7 @@ inline constexpr ClassificationEntry kTable[724] = {
 
 // Index == D2RL::Items::ItemInfo::qualityRecordId for a quality==Set item.
 // Empty string means "row has no usable set/item text" (skip grouping).
-inline constexpr const char* kSetGroupByRow[456] = {
+inline constexpr const char* kSetGroupByRow[455] = {
 	"Civerb's Vestments",
 	"Civerb's Vestments",
 	"Civerb's Vestments",
@@ -815,7 +815,6 @@ inline constexpr const char* kSetGroupByRow[456] = {
 	"Arcanna's Tricks",
 	"Arcanna's Tricks",
 	"Arcanna's Tricks",
-	"",
 	"Natalya's Odium",
 	"Natalya's Odium",
 	"Natalya's Odium",
