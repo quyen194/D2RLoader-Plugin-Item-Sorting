@@ -312,15 +312,64 @@ here for review, same as the algorithm-level scope note below.
    tabs). (`sort_engine.cpp`, the `"set"` mode's `match()` in
    `BuiltinModes()`.)
 
-2. **`sortLevel` is an approximation.** It only carries the base item's own
-   `levelreq` (from `weapons.txt`/`armor.txt`/`misc.txt`, baked into
-   `item_classification_data.hpp`). The save-editor's `_ssItemSortLevel`
-   also raises it via `UniqueItems.txt`/`SetItems.txt`'s `lvl req` and the
-   item's rolled affix `levelreq` -- both need row layouts
-   `DataTableService` doesn't publish a typed struct for (`data_tables.h`
-   hands back raw, undocumented row bytes). `itemLevel` (live, from
-   `ItemInfo`) is the primary tie-break ahead of `sortLevel` in every sort
-   key, so the practical impact is small (same-`itemLevel` ties only).
+2. **`sortLevel` was an approximation -- now fixed.** It used to carry only
+   the base item's own `levelreq` (from `weapons.txt`/`armor.txt`/
+   `misc.txt`). That sounded like a minor same-`itemLevel`-ties-only gap, but
+   a live report ("reqLevel sorting looks jumbled on the ring/charm pages")
+   traced back to something much bigger: `Rings.txt`/`Charms.txt`/
+   `Jewels.txt`/`Amulets.txt` each have exactly **one** row, with
+   `levelreq == 0`, so `baseLevelReq` never varied across an entire ring,
+   amulet, charm, or jewel category regardless of quality or roll -- the
+   `"reqLevel"` sort key was a complete no-op there, and every visible order
+   was actually being decided by whatever key came next (`"-ilvl"`, then
+   name), which has no relationship to the item's own displayed "Required
+   Level". Gear categories were affected too, just less visibly (base armor/
+   weapon types do vary in `levelreq`, so `reqLevel` wasn't a *total* no-op
+   there, just an approximation).
+
+   `Classification::TrueReqLevel()` (`item_classification.hpp`/`.cpp`) now
+   ports the save-editor's `_ssItemSortLevel`/`_ssAffixLevelReq` in full,
+   using fields the SDK's `item.h` documents plainly (no undocumented
+   `DataTableService` row-layout guessing needed after all):
+   `ItemInfo::qualityRecordId` is a valid row index into `UniqueItems.txt`
+   for `quality == Unique`, not just `SetItems.txt` for `quality == Set` --
+   both are now read (`lvl req` column) and applied. `ItemInfo::prefixIds`/
+   `suffixIds` (up to 3 each, populated for magic/rare/crafted items) are the
+   *combined* MagicSuffix+MagicPrefix+AutoMagic ID space item.h describes
+   ("with 10 suffix rows, MagicPrefix table-local ID 1 has combined ID 11");
+   `TrueReqLevel()` decodes each nonzero ID against `magicprefix.txt`/
+   `magicsuffix.txt`'s own `levelreq` column and takes the highest, ignoring
+   an ID that lands in the AutoMagic range (same as the save-editor, which
+   never consults `AutoMagic.txt` for this). The four new lookup tables this
+   needed (`kSetLevelReqByRow`, `kUniqueLevelReqByRow`,
+   `kMagicPrefixLevelReq`, `kMagicSuffixLevelReq`) are baked into
+   `item_classification_data.hpp` by `tools/gen_classification.py` exactly
+   like `kTable`/`kSetGroupByRow` already were, and are also available
+   through `mod_data_path` (see "Config" above) for a mod whose data has
+   drifted from the bundled reference copy.
+
+   Building this surfaced a second, more general finding: the
+   `kSetGroupByRow` off-by-one row this README previously described as "a
+   genuinely unused/reserved row in Blizzard's own data" is actually D2R's
+   own literal `"Expansion"` row -- a classic/expansion section delimiter
+   present in `setitems.txt`, `uniqueitems.txt`, `itemtypes.txt`,
+   `weapons.txt`, `armor.txt`, and `misc.txt` alike (confirmed against the
+   reference save-editor's own parser, which explicitly skips any row whose
+   first column is exactly `"Expansion"`). It only ever mattered for
+   `setitems.txt` before because that was the only table indexed by row
+   *position*; adding `uniqueitems.txt` row-position indexing for the fix
+   above would have silently reproduced the exact same off-by-one bug for
+   Unique items had this not been caught first. Both `gen_classification.py`
+   and `mod_item_data.cpp`'s table reader now skip a literal `"Expansion"`
+   row explicitly (the general, correct rule) rather than inferring it from
+   blank columns (the narrower rule the original fix happened to get right
+   by luck, for `setitems.txt` specifically).
+
+   Validated offline: parsing the same reference txt files these tables are
+   generated from and diffing all four new arrays against the embedded ones
+   found zero mismatches, and `TrueReqLevel()` was checked against known
+   real values (Raven Frost's Unique row -> 45, Natalya's Totem's Set row ->
+   59, and both a suffix- and a prefix-affix combined-ID decode).
 
 3. **No SDK query for the shared-stash tab count.** Worked around with the
    `shared_stash_tab_count` config value (see "Config" above) -- there is no
@@ -421,23 +470,27 @@ here for review, same as the algorithm-level scope note below.
    The blank-row bug above is really a special case of a broader risk:
    `item_classification_data.hpp` is a snapshot, generated once at build
    time (`tools/gen_classification.py`) from a *bundled reference copy* of
-   `itemtypes/weapons/armor/misc/setitems.txt` -- not from whatever mod is
-   actually active in the running game. If a mod's data ever diverges from
-   that bundled copy (a future Reimagined patch renumbers `setitems.txt`
-   rows again, or you point this plugin at a different mod entirely), the
-   embedded table goes stale and Classify()/SetGroupForRow() start lying
-   again, silently, exactly like this bug did. There's no SDK-level fix for
-   this today (the SDK's `DataTableService` doesn't publish typed row
-   structs for these tables either -- see gap #2 above), so as a practical
-   mitigation there is now a `mod_data_path` setting (see "Config" above): point it at a mod's
+   `itemtypes/weapons/armor/misc/setitems/uniqueitems/magicprefix/
+   magicsuffix.txt` (the last three feed `TrueReqLevel()` -- see gap #2
+   above) -- not from whatever mod is actually active in the running game.
+   If a mod's data ever diverges from that bundled copy (a future Reimagined
+   patch renumbers `setitems.txt` rows again, or you point this plugin at a
+   different mod entirely), the embedded tables go stale and
+   Classify()/SetGroupForRow()/TrueReqLevel() start lying again, silently,
+   exactly like this bug did. There's no SDK-level fix for this today (the
+   SDK's `DataTableService` doesn't publish typed row structs for these
+   tables either -- see gap #2 above), so as a practical mitigation there is
+   now a `mod_data_path` setting (see "Config" above): point it at a mod's
    own folder and the plugin parses that mod's *own* txt files fresh, every
    Auto Sort run, instead of trusting the embedded snapshot. Leave it empty
    to keep using the embedded table (the default, and still the right
    choice if you don't know your mod's data folder path). This was
-   validated offline by parsing the same reference txt files this table
-   was generated from and diffing every one of the 724 classification
-   entries and all 455 `kSetGroupByRow` rows against the embedded table:
-   zero mismatches.
+   validated offline by parsing the same reference txt files these tables
+   were generated from and diffing every one of the 724 classification
+   entries, all 455 `kSetGroupByRow`/`kSetLevelReqByRow` rows, all 1483
+   `kUniqueLevelReqByRow` rows, and all 1117/823
+   `kMagicPrefixLevelReq`/`kMagicSuffixLevelReq` rows against the embedded
+   tables: zero mismatches.
 
 4. **No SDK query for "which tab is currently displayed."** Worked around
    with a plugin-tracked "selected tab" pointer (starts at 0, moved with the

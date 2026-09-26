@@ -28,16 +28,36 @@ struct LoadedTable {
 	std::vector<ClassificationEntry> entries;
 
 	// Index == D2RL::Items::ItemInfo::qualityRecordId for a quality==Set
-	// item, same convention as the embedded kSetGroupByRow (including
-	// skipping fully-blank interior rows so indices line up with what the
-	// live game actually assigns -- see the loader's own comment).
+	// item, same convention as the embedded kSetGroupByRow -- rows are
+	// skipped exactly where the live game's own row-position numbering skips
+	// them (a literal "Expansion" section-delimiter row -- see LoadFromFolder's
+	// ReadTable comment), so indices line up with what qualityRecordId
+	// actually assigns.
 	std::vector<std::string> setGroupByRow;
+
+	// setitems.txt's own "lvl req" column, same row indexing as
+	// setGroupByRow (one array per column, same row order -- see
+	// Classification::TrueReqLevel()).
+	std::vector<uint16_t> setLevelReqByRow;
+
+	// uniqueitems.txt's own "lvl req" column. Index == qualityRecordId for a
+	// quality==Unique item -- item.h confirms qualityRecordId is a valid
+	// UniqueItems row for Unique quality too, not just SetItems for Set.
+	std::vector<uint16_t> uniqueLevelReqByRow;
+
+	// magicprefix.txt / magicsuffix.txt's own "levelreq" column. Index+1 ==
+	// the affix's table-local ID within ItemInfo::prefixIds/suffixIds'
+	// *combined* MagicSuffix+MagicPrefix+AutoMagic ID space (see
+	// Classification::TrueReqLevel()'s AffixLevelReq helper for the decode).
+	std::vector<uint16_t> magicPrefixLevelReq;
+	std::vector<uint16_t> magicSuffixLevelReq;
 };
 
 // Reads <modDataPath>/data/global/excel/{itemtypes,weapons,armor,misc,
-// setitems}.txt and builds a LoadedTable with the exact same classification
-// rules as tools/gen_classification.py (kept in sync by hand -- see that
-// script's comments for the logic this ports).
+// setitems,uniqueitems,magicprefix,magicsuffix}.txt and builds a LoadedTable
+// with the exact same classification rules as tools/gen_classification.py
+// (kept in sync by hand -- see that script's comments for the logic this
+// ports).
 //
 // Returns std::nullopt on any failure (missing/unreadable file, malformed
 // header, or a genuinely corrupt row) and, if `error` is non-null, writes a

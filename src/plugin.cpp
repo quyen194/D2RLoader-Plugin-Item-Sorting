@@ -344,6 +344,7 @@ auto __cdecl CollectSharedStashItem(const PluginContext* ctx, const Items::ItemI
 	fact.x               = item->x;
 	fact.y               = item->y;
 
+	uint32_t baseLevelReq = 0;
 	if (auto cls = RemoteStashSorting::Classification::Classify(item->code)) {
 		fact.w           = cls->width;
 		fact.h           = cls->height;
@@ -351,7 +352,7 @@ auto __cdecl CollectSharedStashItem(const PluginContext* ctx, const Items::ItemI
 		fact.isTwoHanded  = cls->isTwoHanded;
 		fact.gearSlot     = cls->gearSlot;
 		fact.nonGearKind  = cls->nonGearKind;
-		fact.sortLevel    = cls->baseLevelReq;
+		baseLevelReq      = cls->baseLevelReq;
 		++state->classifiedCount;
 	} else {
 		++state->unclassifiedCount;
@@ -359,13 +360,20 @@ auto __cdecl CollectSharedStashItem(const PluginContext* ctx, const Items::ItemI
 			state->sampleUnclassifiedCodes.push_back(item->code);
 		}
 	}
-	// v1 scope note (README "Known gaps"): sortLevel above is only the base
-	// item's own levelreq. The save-editor's _ssItemSortLevel also raises it
-	// using UniqueItems/SetItems "lvl req" and the item's rolled affix
-	// levelreq, both of which need row layouts DataTableService does not
-	// publish (see data_tables.h -- rows are untyped bytes). itemLevel
-	// (below) is the primary tie-break ahead of sortLevel in every mode, so
-	// this only affects ordering among same-itemLevel items.
+
+	// TrueReqLevel() is a full port of the save-editor's _ssItemSortLevel: it
+	// raises baseLevelReq using UniqueItems.txt/SetItems.txt's own "lvl req"
+	// (qualityRecordId is a valid row for BOTH Unique and Set quality -- see
+	// item.h) and the highest "levelreq" among this item's rolled affixes
+	// (prefixIds/suffixIds). This matters even for an unclassified code
+	// (baseLevelReq==0 above): a Unique/Set/affix bump can still apply. Fixes
+	// a real, previously-unnoticed gap: Rings.txt/Charms.txt/Jewels.txt/
+	// Amulets.txt each have exactly one row with levelreq==0, so the
+	// "reqLevel" sort key used to never vary across an entire ring/charm/
+	// jewel/amulet category, regardless of quality or roll -- ties were
+	// silently decided by whatever key came next (usually "-ilvl"), with no
+	// relationship at all to the item's own displayed "Required Level".
+	fact.sortLevel = RemoteStashSorting::Classification::TrueReqLevel(fact.quality, item->qualityRecordId, item->prefixIds, item->suffixIds, baseLevelReq);
 
 	if (item->quality == Items::Quality::Set) {
 		fact.setId        = item->qualityRecordId;

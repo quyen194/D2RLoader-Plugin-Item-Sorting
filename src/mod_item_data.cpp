@@ -75,7 +75,26 @@ bool ReadTable(const std::string& path, Table* out, std::string* error) {
 
 	out->rows.clear();
 	out->rows.reserve(lines.size() - 1);
-	for (size_t i = 1; i < lines.size(); ++i) out->rows.push_back(SplitTab(lines[i]));
+	for (size_t i = 1; i < lines.size(); ++i) {
+		std::vector<std::string> cells = SplitTab(lines[i]);
+		// D2R's own excel tables use a literal "Expansion" row as a
+		// classic/expansion section delimiter in several tables (setitems,
+		// uniqueitems, itemtypes, weapons, armor, misc.txt) -- it is not real
+		// data, and a table indexed by ROW POSITION (SetItems/UniqueItems'
+		// qualityRecordId) does NOT count it as a row from the live game's
+		// perspective. This is the exact row the kSetGroupByRow off-by-one
+		// bug traced back to (see README "Known gaps" #3 and
+		// tools/gen_classification.py's matching comment) -- it happened to
+		// also be fully blank in its 'item'/'set' columns, but "Expansion" in
+		// column 0 is the real, general rule (confirmed against the
+		// reference save-editor's own parseTSV:
+		// `if (cols[0].trim() === 'Expansion') continue`). Skipping it here,
+		// for every table this function reads, keeps setGroupByRow/
+		// setLevelReqByRow/uniqueLevelReqByRow all aligned with the live
+		// qualityRecordId numbering.
+		if (!cells.empty() && cells[0] == "Expansion") continue;
+		out->rows.push_back(std::move(cells));
+	}
 	return true;
 }
 
@@ -144,6 +163,10 @@ int ParseIntOr(const std::string& s, int fallback) {
 	}
 }
 
+uint16_t ParseLevelReq(const Table& t, const std::vector<std::string>& row, const std::string& col) {
+	return static_cast<uint16_t>(std::clamp(ParseIntOr(t.Cell(row, col), 0), 0, 65535));
+}
+
 uint32_t MakeItemCodeLE(const std::string& code) {
 	std::string padded = code;
 	padded.resize(4, ' ');
@@ -171,13 +194,16 @@ std::optional<LoadedTable> LoadFromFolder(const std::string& modDataPath, std::s
 	while (!base.empty() && base.back() == '/') base.pop_back();
 	const std::string excelDir = base + "/data/global/excel/";
 
-	Table itemtypesT, weaponsT, armorT, miscT, setitemsT;
+	Table itemtypesT, weaponsT, armorT, miscT, setitemsT, uniqueitemsT, magicprefixT, magicsuffixT;
 	std::string err;
 	if (!ReadTable(excelDir + "itemtypes.txt", &itemtypesT, &err)) return fail(err);
 	if (!ReadTable(excelDir + "weapons.txt", &weaponsT, &err)) return fail(err);
 	if (!ReadTable(excelDir + "armor.txt", &armorT, &err)) return fail(err);
 	if (!ReadTable(excelDir + "misc.txt", &miscT, &err)) return fail(err);
 	if (!ReadTable(excelDir + "setitems.txt", &setitemsT, &err)) return fail(err);
+	if (!ReadTable(excelDir + "uniqueitems.txt", &uniqueitemsT, &err)) return fail(err);
+	if (!ReadTable(excelDir + "magicprefix.txt", &magicprefixT, &err)) return fail(err);
+	if (!ReadTable(excelDir + "magicsuffix.txt", &magicsuffixT, &err)) return fail(err);
 
 	// ---- buildItemTypeChains ----
 	EquivMap equiv;
@@ -288,14 +314,39 @@ std::optional<LoadedTable> LoadFromFolder(const std::string& modDataPath, std::s
 		}
 	}
 
-	// ---- setitems.txt: row position (skipping genuinely-unused rows) ->
-	// raw 'set' column -- mirrors the (now-fixed) gen_classification.py.
+	// ---- setitems.txt: row position (the "Expansion" delimiter already
+	// dropped by ReadTable above) -> 'set' + 'lvl req' columns -- mirrors
+	// gen_classification.py. Both arrays are built from the same row loop so
+	// their indices always line up with each other and with the live
+	// qualityRecordId numbering.
 	result.setGroupByRow.reserve(setitemsT.rows.size());
+	result.setLevelReqByRow.reserve(setitemsT.rows.size());
 	for (const auto& row : setitemsT.rows) {
-		std::string item  = setitemsT.Cell(row, "item");
-		std::string setV  = setitemsT.Cell(row, "set");
-		if (item.empty() && setV.empty()) continue; // unused row -- no live qualityRecordId slot
-		result.setGroupByRow.push_back(setV);
+		std::string item = setitemsT.Cell(row, "item");
+		std::string setV = setitemsT.Cell(row, "set");
+		result.setGroupByRow.push_back((!item.empty() && !setV.empty()) ? setV : std::string());
+		result.setLevelReqByRow.push_back(ParseLevelReq(setitemsT, row, "lvl req"));
+	}
+
+	// ---- uniqueitems.txt: row position -> 'lvl req' column. Same convention
+	// as setitems.txt above -- qualityRecordId is a valid UniqueItems row for
+	// quality==Unique items too (item.h), not just SetItems for Set.
+	result.uniqueLevelReqByRow.reserve(uniqueitemsT.rows.size());
+	for (const auto& row : uniqueitemsT.rows) {
+		result.uniqueLevelReqByRow.push_back(ParseLevelReq(uniqueitemsT, row, "lvl req"));
+	}
+
+	// ---- magicprefix.txt / magicsuffix.txt: table-local row position ->
+	// 'levelreq' column. See item_classification.hpp's TrueReqLevel() doc
+	// comment for how ItemInfo::prefixIds/suffixIds' *combined* ID resolves
+	// into these two arrays.
+	result.magicPrefixLevelReq.reserve(magicprefixT.rows.size());
+	for (const auto& row : magicprefixT.rows) {
+		result.magicPrefixLevelReq.push_back(ParseLevelReq(magicprefixT, row, "levelreq"));
+	}
+	result.magicSuffixLevelReq.reserve(magicsuffixT.rows.size());
+	for (const auto& row : magicsuffixT.rows) {
+		result.magicSuffixLevelReq.push_back(ParseLevelReq(magicsuffixT, row, "levelreq"));
 	}
 
 	return result;

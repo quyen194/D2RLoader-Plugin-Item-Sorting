@@ -45,6 +45,33 @@ std::optional<Facts> Classify(uint32_t packedItemCode);
 // atomic-set grouping skip the item, same as a completely unknown item would).
 std::string SetGroupForRow(int32_t qualityRecordId);
 
+// The TRUE required level for one item -- a full port of the save-editor's
+// _ssItemSortLevel/_ssAffixLevelReq, not just the base item's own levelreq
+// (see baseLevelReq above). Fixes a real problem: Rings.txt/Charms.txt/
+// Jewels.txt/Amulets.txt each have exactly one row with levelreq == 0, so
+// baseLevelReq alone never varies across an entire ring/charm/jewel/amulet
+// category -- every "reqLevel" sort key tie there was actually being broken
+// by the next key (usually "-ilvl"), which has no relationship to the
+// "Required Level" shown in the item's own tooltip. This raises baseLevelReq
+// using whichever of the following is higher:
+//   - quality == Unique: UniqueItems.txt's own "lvl req" for row
+//     qualityRecordId (item.h confirms qualityRecordId is a valid
+//     UniqueItems row for Unique quality, not just SetItems for Set)
+//   - quality == Set: SetItems.txt's own "lvl req" for row qualityRecordId
+//   - any rolled affix: the highest "levelreq" among up to 3 prefixIds + 3
+//     suffixIds (magic/rare/crafted items all populate these the same way;
+//     a 0 entry means "no affix in that slot" and contributes nothing).
+//     prefixIds/suffixIds are ItemInfo's own *combined* MagicSuffix+
+//     MagicPrefix+AutoMagic ID space; an ID landing in the AutoMagic range
+//     resolves to 0 here, same as the save-editor never consulting
+//     AutoMagic.txt for this.
+// qualityRecordId/prefixIds/suffixIds should be passed through verbatim from
+// D2RL::Items::ItemInfo; baseLevelReq should be the Classify() result's
+// baseLevelReq for this item's code (0 if the code didn't classify at all --
+// a Unique/Set/affix bump can still meaningfully apply on top of that).
+uint32_t TrueReqLevel(
+    uint32_t quality, int32_t qualityRecordId, const uint32_t (&prefixIds)[3], const uint32_t (&suffixIds)[3], uint32_t baseLevelReq);
+
 // Optional runtime alternative to the embedded table above: parses the
 // active mod's OWN itemtypes/weapons/armor/misc/setitems.txt (from
 // <modDataPath>/data/global/excel/) and switches Classify()/

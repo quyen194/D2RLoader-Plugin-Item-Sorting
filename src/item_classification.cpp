@@ -13,6 +13,57 @@ namespace {
 // config, it is only ever written from the game thread during config
 // (re)load, never read concurrently with a write.
 std::optional<ModData::LoadedTable> g_override;
+
+// D2RL::Items::Quality's numeric values, per ItemFacts' own doc comment
+// (Magic=4, Set=5, Rare=6, Unique=7, Crafted=8). Not worth pulling in the SDK
+// header just for these two.
+constexpr uint32_t kQualitySet    = 5;
+constexpr uint32_t kQualityUnique = 7;
+
+uint32_t LevelReqAt(const uint16_t* data, size_t n, int32_t index) {
+	if (index < 0 || static_cast<size_t>(index) >= n) return 0;
+	return data[index];
+}
+
+uint32_t SetLevelReqForRow(int32_t qualityRecordId) {
+	if (g_override) return LevelReqAt(g_override->setLevelReqByRow.data(), g_override->setLevelReqByRow.size(), qualityRecordId);
+	return LevelReqAt(kSetLevelReqByRow, std::size(kSetLevelReqByRow), qualityRecordId);
+}
+
+uint32_t UniqueLevelReqForRow(int32_t qualityRecordId) {
+	if (g_override) return LevelReqAt(g_override->uniqueLevelReqByRow.data(), g_override->uniqueLevelReqByRow.size(), qualityRecordId);
+	return LevelReqAt(kUniqueLevelReqByRow, std::size(kUniqueLevelReqByRow), qualityRecordId);
+}
+
+// combinedId is ItemInfo::prefixIds/suffixIds' *combined* MagicSuffix+
+// MagicPrefix+AutoMagic ID space (one-based; 0 means "no affix in this
+// slot"): [1, numSuffixRows] is a MagicSuffix.txt row, (numSuffixRows,
+// numSuffixRows+numPrefixRows] is a MagicPrefix.txt row, and anything past
+// that is AutoMagic -- which resolves to 0 here, matching the save-editor's
+// _ssAffixLevelReq (it never consults AutoMagic.txt for this).
+uint32_t AffixLevelReq(uint32_t combinedId) {
+	if (combinedId == 0) return 0;
+
+	const uint16_t* suffixData;
+	size_t          suffixN;
+	const uint16_t* prefixData;
+	size_t          prefixN;
+	if (g_override) {
+		suffixData = g_override->magicSuffixLevelReq.data();
+		suffixN    = g_override->magicSuffixLevelReq.size();
+		prefixData = g_override->magicPrefixLevelReq.data();
+		prefixN    = g_override->magicPrefixLevelReq.size();
+	} else {
+		suffixData = kMagicSuffixLevelReq;
+		suffixN    = std::size(kMagicSuffixLevelReq);
+		prefixData = kMagicPrefixLevelReq;
+		prefixN    = std::size(kMagicPrefixLevelReq);
+	}
+
+	if (combinedId <= suffixN) return suffixData[combinedId - 1];
+	if (combinedId <= suffixN + prefixN) return prefixData[combinedId - suffixN - 1];
+	return 0; // AutoMagic, or an ID past both tables
+}
 }
 
 std::optional<Facts> Classify(uint32_t packedItemCode) {
@@ -87,6 +138,22 @@ void UseEmbeddedTable() {
 
 bool IsUsingModFolder() {
 	return g_override.has_value();
+}
+
+uint32_t TrueReqLevel(
+    uint32_t quality, int32_t qualityRecordId, const uint32_t (&prefixIds)[3], const uint32_t (&suffixIds)[3], uint32_t baseLevelReq) {
+	uint32_t lvl = baseLevelReq;
+
+	if (quality == kQualityUnique) {
+		lvl = (std::max)(lvl, UniqueLevelReqForRow(qualityRecordId));
+	} else if (quality == kQualitySet) {
+		lvl = (std::max)(lvl, SetLevelReqForRow(qualityRecordId));
+	}
+
+	for (uint32_t id : prefixIds) lvl = (std::max)(lvl, AffixLevelReq(id));
+	for (uint32_t id : suffixIds) lvl = (std::max)(lvl, AffixLevelReq(id));
+
+	return lvl;
 }
 
 }
