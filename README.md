@@ -586,7 +586,10 @@ here for review, same as the algorithm-level scope note below.
    larger than that (a near-maximally full, near-maximally sized stash) gets
    split into several transactions, each atomic on its own but not atomic as
    a whole. `ApplyMoves` logs a warning when this happens. Realistically
-   rare (would need on the order of thousands of items in play at once).
+   rare (would need on the order of thousands of items in play at once). As
+   of item #15 below, this chunking never crosses a dependency-layer
+   boundary -- a single *layer* over 4096 operations is what actually
+   triggers the warning now, not the plan as a whole.
 
 11. **The `unidentified` sort mode isn't ported.** The save-editor has one;
     `DefaultLayout()` here mirrors the other `SS_AUTO_LAYOUT` entries only.
@@ -685,6 +688,101 @@ here for review, same as the algorithm-level scope note below.
     gear items had no category and were silently excluded from the plan),
     with zero collisions in `DetectCollisions`'s self-check.
 
+15. **A live run with the new categories above (item #14) surfaced a much
+    bigger, pre-existing problem in how the plan is actually sent to the
+    game -- `ApplyMoves` needed two separate fixes.**
+
+    **First**, a real Auto Sort on a 3616-item stash committed
+    `0/3616 (transaction result 2)`. `ExistingItemTransactionResult`'s own
+    doc comment explains why: `committedOperationCount is zero on
+    failure` -- one operation anywhere in a multi-thousand-item transaction
+    that the game rejects (e.g. an item it doesn't consider movable from
+    wherever it actually is) sinks every other, otherwise-fine operation
+    riding in the same call. A single 4096-operation-chunked loop had no way
+    to tell "one poison operation" apart from "everything is broken."
+    Fixed by having `ApplyMoves` bisect a failing chunk on any non-`Success`
+    result, retrying each half separately and recursing down to individual
+    operations when necessary, so a plan still commits everything it safely
+    can and only the genuinely-rejected operation(s) are skipped (logged by
+    handle/destination/result code). Live-verified: the same plan went from
+    `0/3616` to `1849/3616` committed, with each of the ~1767 rejections now
+    individually logged instead of the whole sort silently doing nothing.
+
+    **Second**, that 1849/3616 partial result turned out to be a much
+    bigger problem than "a few bad items": the ~1767 rejections were split
+    between `Result::Unsupported` and `Result::Conflict`, concentrated in
+    contiguous handle ranges each landing in one tab -- a systemic pattern,
+    not isolated bad data. The real cause: `RunAutoSort` computes every
+    item's *final* destination by filling a layout it builds fresh in
+    memory, with no regard for what is *currently*, physically sitting in
+    that cell live in-game. Since a full Auto Sort repositions most or all
+    of the stash, most destinations are, at the moment `ApplyMoves` tries to
+    move into them, still occupied by some *other* item this same plan is
+    also about to move elsewhere -- e.g. item A's destination is currently
+    item B's position, but B hasn't moved yet because its own move comes
+    later in the plan (or in a different, not-yet-applied chunk). The live
+    Move API correctly rejects that with `Conflict`; no amount of retrying
+    the *same* order fixes it, since nothing frees up between retries.
+    `DetectCollisions`'s self-check didn't catch this because it only
+    replays moves into a *fresh* grid checking the final layout for
+    internal consistency -- it was never checking planned destinations
+    against *live*, pre-sort occupancy, which is a different question.
+
+    Fixed with a new function, `SequenceMovesForLiveApply`
+    (`sort_engine.hpp`/`.cpp`), inserted between planning and `ApplyMoves`
+    in `DoAutoSort`/`DoAddBlankPage`/`DoRemoveCurrentPage`. It collapses the
+    plan to one net move per handle (same reasoning `DetectCollisions`
+    already uses), builds a dependency graph from *live* current occupancy
+    against each move's destination footprint (`move(A) depends on
+    move(B)` whenever B currently sits somewhere inside A's destination),
+    and topologically sorts it into **layers**: every move in one layer is
+    independent of every other move in that same layer, so a layer is safe
+    to send to the live game as a single batch regardless of whether
+    operations within one transaction call can see each other's effects
+    (the SDK's own doc comment is ambiguous on this -- it documents a
+    `failureIndex`, suggesting in-order attempts, but also a full rollback
+    to zero on any failure) -- but a layer must fully finish before the next
+    one starts, since later layers depend on earlier ones having actually
+    happened live. A dependency **cycle** (A wants B's current spot, B wants
+    A's -- or a longer loop of the same shape) has no valid one-at-a-time
+    order at all without a spare cell, so one member of each cycle found is
+    temporarily relocated to a scratch cell (proven free: not currently
+    occupied by any live item, and not any move's own final destination)
+    to break it, then moved on to its real destination once the rest of the
+    cycle resolves -- the standard "sort in place with one spare slot"
+    trick. `ApplyMoves` itself got simpler as a result: it no longer needs
+    to guess at ordering, just bisect/chunk freely *within* each layer
+    (`SequencedMoves::layerSizes`) and never batch *across* a layer
+    boundary.
+
+    Validated three ways, since `plugin.cpp` can only ever be built with
+    real MSVC (see "Testing" below) so the live SDK call itself can't be
+    exercised here: (1) `test_sequence_moves.cpp` (27 assertions) checks
+    `SequenceMovesForLiveApply` directly against an independent replay
+    judge for a simple dependency chain, a 2-cycle, a longer cycle mixed
+    with an unrelated chain, an already-in-place no-op move, multi-cell
+    (non-1x1) footprints straddling more than one current occupant, and a
+    300-item dense reshuffle containing 150 disjoint 2-cycles -- confirming
+    every produced order is conflict-free when replayed live, every layer
+    is internally independent, and every handle's true final destination
+    always matches the original plan regardless of any scratch hop needed
+    to get there; (2) `apply_moves_bisect_test.cpp` mocks the transaction
+    API's all-or-nothing behavior to confirm `ApplyMoves`' bisection still
+    isolates a poison operation correctly; (3) `end_to_end_apply_test.cpp`
+    links the real `sort_engine.cpp` (no mocking) against a mock live-game
+    transaction API modeling the SDK's documented semantics literally
+    (sequential in-order attempt, full rollback on any failure) and runs a
+    deliberately worst-case ~3600-item full-stash reshuffle -- a near-total
+    reversal permutation packing over 1300 simultaneous, independent swap
+    cycles, far more adversarial than any real category-based sort would
+    produce. Result: 99.4% of the plan committed live in only 187 calls
+    (vs. the original bug's 0%, or the bisection-only fix's ~51%), with
+    every one of the remaining handful of failures (large items caught in
+    a scratch-cell pile-up specific to this synthetic worst case) still
+    individually attempted and cleanly logged rather than silently dropped.
+    (`sort_engine.hpp`/`.cpp`: `SequenceMovesForLiveApply`, `OwnerGrid`,
+    `FindScratchCell`; `plugin.cpp`: `ApplyMoves`, and its three call sites.)
+
 ## Testing
 
 - `src/sort_engine.cpp` and `src/item_classification.cpp` build cleanly
@@ -692,7 +790,14 @@ here for review, same as the algorithm-level scope note below.
   exercised end to end with a synthetic scenario (unique gear, rare gear,
   unique/magic charms, a unique ring, and a 3-piece set) confirming correct
   category tab-range offsetting, atomic set-piece grouping into one tab, and
-  the `MoveBlankTabAfter`/`PushBlankTabToEnd` tab-shift math.
+  the `MoveBlankTabAfter`/`PushBlankTabToEnd` tab-shift math. `test_new_
+  features.cpp` (25 assertions, item #14) and `test_sequence_moves.cpp` (27
+  assertions, item #15) link against the real `sort_engine.cpp` the same
+  way and build/run identically. `apply_moves_bisect_test.cpp` and
+  `end_to_end_apply_test.cpp` (item #15) validate `ApplyMoves`' bisection
+  and the full plan-to-live-transaction path against a mock transaction API
+  standing in for the parts that genuinely need `plugin.cpp`/the live SDK
+  (see below).
 - `src/plugin.cpp` builds cleanly with MSVC (x64, C++20, `/EHsc`) via
   CMake + Ninja. It was originally hand-checked against the exact struct
   layouts, function signatures, and calling patterns in

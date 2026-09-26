@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <map>
 #include <optional>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -440,6 +441,58 @@ struct Occupancy {
 	void Mark(int32_t x, int32_t y, uint32_t iw, uint32_t ih) {
 		for (uint32_t dy = 0; dy < ih; ++dy)
 			for (uint32_t dx = 0; dx < iw; ++dx) cells[static_cast<size_t>(y + dy) * w + (x + dx)] = true;
+	}
+};
+
+// Like Occupancy, but each occupied cell remembers WHICH handle sits there --
+// used by SequenceMovesForLiveApply to simulate live occupancy as moves are
+// walked in dependency order (Occupancy's plain bool is enough for
+// DetectCollisions, which only ever asks "is this free", never "who is
+// this").
+struct OwnerGrid {
+	static constexpr uint64_t kNoOwner = (std::numeric_limits<uint64_t>::max)();
+
+	uint32_t              w = 0, h = 0;
+	std::vector<uint64_t> owner; // row-major, size w*h, kNoOwner = empty
+
+	explicit OwnerGrid(uint32_t gw = 0, uint32_t gh = 0) : w(gw), h(gh), owner(static_cast<size_t>(gw) * gh, kNoOwner) {}
+
+	bool InBounds(int32_t x, int32_t y, uint32_t iw, uint32_t ih) const {
+		return x >= 0 && y >= 0 && static_cast<uint32_t>(x) + iw <= w && static_cast<uint32_t>(y) + ih <= h;
+	}
+
+	bool AllFree(int32_t x, int32_t y, uint32_t iw, uint32_t ih) const {
+		if (!InBounds(x, y, iw, ih)) return false;
+		for (uint32_t dy = 0; dy < ih; ++dy)
+			for (uint32_t dx = 0; dx < iw; ++dx)
+				if (owner[static_cast<size_t>(y + dy) * w + (x + dx)] != kNoOwner) return false;
+		return true;
+	}
+
+	// Collects the distinct non-empty owners overlapping the block (out-of-
+	// range cells are silently skipped rather than treated as occupied --
+	// callers only use this on destinations already validated elsewhere).
+	void CollectOwners(int32_t x, int32_t y, uint32_t iw, uint32_t ih, std::vector<uint64_t>& out) const {
+		for (uint32_t dy = 0; dy < ih; ++dy) {
+			for (uint32_t dx = 0; dx < iw; ++dx) {
+				const int32_t xx = x + static_cast<int32_t>(dx);
+				const int32_t yy = y + static_cast<int32_t>(dy);
+				if (xx < 0 || yy < 0 || static_cast<uint32_t>(xx) >= w || static_cast<uint32_t>(yy) >= h) continue;
+				const uint64_t o = owner[static_cast<size_t>(yy) * w + static_cast<uint32_t>(xx)];
+				if (o != kNoOwner) out.push_back(o);
+			}
+		}
+	}
+
+	void Mark(int32_t x, int32_t y, uint32_t iw, uint32_t ih, uint64_t who) {
+		for (uint32_t dy = 0; dy < ih; ++dy)
+			for (uint32_t dx = 0; dx < iw; ++dx) owner[static_cast<size_t>(y + dy) * w + (x + dx)] = who;
+	}
+
+	void Clear(int32_t x, int32_t y, uint32_t iw, uint32_t ih) {
+		if (!InBounds(x, y, iw, ih)) return;
+		for (uint32_t dy = 0; dy < ih; ++dy)
+			for (uint32_t dx = 0; dx < iw; ++dx) owner[static_cast<size_t>(y + dy) * w + (x + dx)] = kNoOwner;
 	}
 };
 
@@ -964,6 +1017,285 @@ std::vector<std::string> DetectCollisions(
 	}
 
 	return out;
+}
+
+namespace {
+
+// First-fit search for a cell guaranteed free for the whole rest of this
+// sequencing run: not occupied by anything live right now (per `live`) and
+// not any move's own planned destination (per `reserved`) -- see
+// SequenceMovesForLiveApply's header comment. Scans tabs in ascending order,
+// row-major within a tab; a real Auto Sort plan leaves plenty of untouched
+// slack (padding/blank tabs, `tabCount` set a bit above the real stash size)
+// so this is expected to succeed on the first tab or two it looks at.
+std::optional<std::tuple<uint32_t, int32_t, int32_t>> FindScratchCell(
+	std::unordered_map<uint32_t, OwnerGrid>& live,
+	std::unordered_map<uint32_t, Occupancy>& reserved,
+	uint32_t                                 tabCount,
+	uint32_t                                 gridWidth,
+	uint32_t                                 gridHeight,
+	uint32_t                                 iw,
+	uint32_t                                 ih) {
+	if (iw == 0 || ih == 0 || iw > gridWidth || ih > gridHeight) return std::nullopt;
+
+	for (uint32_t tab = 0; tab < tabCount; ++tab) {
+		auto liveIt = live.find(tab);
+		auto resIt  = reserved.find(tab);
+		for (uint32_t y = 0; y + ih <= gridHeight; ++y) {
+			for (uint32_t x = 0; x + iw <= gridWidth; ++x) {
+				if (liveIt != live.end() && !liveIt->second.AllFree(static_cast<int32_t>(x), static_cast<int32_t>(y), iw, ih)) continue;
+				if (resIt != reserved.end() && !resIt->second.Free(static_cast<int32_t>(x), static_cast<int32_t>(y), iw, ih)) continue;
+				return std::make_tuple(tab, static_cast<int32_t>(x), static_cast<int32_t>(y));
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+} // namespace
+
+SequencedMoves SequenceMovesForLiveApply(
+	const std::vector<ItemFacts>& items, const std::vector<PlannedMove>& moves, uint32_t tabCount, uint32_t gridWidth,
+	uint32_t gridHeight) {
+	SequencedMoves result;
+
+	std::unordered_map<uint64_t, const ItemFacts*> byHandle;
+	byHandle.reserve(items.size());
+	for (const auto& it : items) byHandle.emplace(it.handle, &it);
+
+	// Collapse to one net move per handle -- only the LAST planned move for a
+	// handle is where it actually ends up (same reasoning as DetectCollisions
+	// above); the live game only ever needs to see it move once, straight
+	// from wherever it currently, physically sits.
+	std::vector<uint64_t>                     order; // handles, in first-seen order
+	std::unordered_map<uint64_t, PlannedMove> finalMoveByHandle;
+	for (const auto& mv : moves) {
+		if (finalMoveByHandle.find(mv.handle) == finalMoveByHandle.end()) order.push_back(mv.handle);
+		finalMoveByHandle[mv.handle] = mv;
+	}
+
+	struct Node {
+		PlannedMove            mv;
+		uint32_t               w = 1, h = 1;
+		uint32_t               curTab = kUnknownTab; // where this handle actually sits right now, live
+		int32_t                curX = 0, curY = 0;
+		int                    inDegree = 0;
+		std::vector<uint64_t>  dependents; // handles whose move is blocked on this one moving out first
+		bool                   done   = false;
+		bool                   usable = true;  // false when live facts for it are missing
+		bool                   broken = false; // true once this node's cycle has been scratch-broken (never re-break it)
+		PlannedMove            scratchMove; // set only when this node's cycle got broken (see the stall branch below)
+	};
+	std::unordered_map<uint64_t, Node> nodes;
+	nodes.reserve(order.size());
+	for (uint64_t h : order) {
+		Node n;
+		n.mv = finalMoveByHandle[h];
+		if (auto it = byHandle.find(h); it != byHandle.end()) {
+			n.w      = it->second->w;
+			n.h      = it->second->h;
+			n.curTab = it->second->sharedStashPage;
+			n.curX   = it->second->x;
+			n.curY   = it->second->y;
+		} else {
+			n.usable = false; // DetectCollisions already flags unknown handles elsewhere
+		}
+		nodes.emplace(h, std::move(n));
+	}
+
+	// Reserve every move's own final destination up front (immutable for the
+	// whole run) so a scratch-cell search never hands out a cell something
+	// else is headed for later.
+	std::unordered_map<uint32_t, Occupancy> reservedByTab;
+	auto                                    reservedGrid = [&](uint32_t tab) -> Occupancy& {
+        auto found = reservedByTab.find(tab);
+        if (found != reservedByTab.end()) return found->second;
+        return reservedByTab.emplace(tab, Occupancy(gridWidth, gridHeight)).first->second;
+	};
+	for (uint64_t h : order) {
+		const Node& n = nodes[h];
+		if (!n.usable) continue;
+		reservedGrid(n.mv.destTab).Mark(n.mv.destX, n.mv.destY, n.w, n.h);
+	}
+
+	// Seed live occupancy from the CURRENT, real state (every item, whether
+	// or not this plan touches it -- an item this plan leaves alone can
+	// still be sitting exactly where a moved item is headed).
+	std::unordered_map<uint32_t, OwnerGrid> liveByTab;
+	auto                                    liveGrid = [&](uint32_t tab) -> OwnerGrid& {
+        auto found = liveByTab.find(tab);
+        if (found != liveByTab.end()) return found->second;
+        return liveByTab.emplace(tab, OwnerGrid(gridWidth, gridHeight)).first->second;
+	};
+	for (const auto& it : items) {
+		if (it.sharedStashPage == kUnknownTab) continue;
+		liveGrid(it.sharedStashPage).Mark(it.x, it.y, it.w, it.h, it.handle);
+	}
+
+	// Build dependency edges: move(h) depends on move(occ) whenever occ is
+	// currently sitting somewhere inside h's planned destination footprint
+	// (a footprint bigger than the source item's own can straddle more than
+	// one current occupant).
+	for (uint64_t h : order) {
+		Node& n = nodes[h];
+		if (!n.usable) continue;
+		std::vector<uint64_t> occupants;
+		liveGrid(n.mv.destTab).CollectOwners(n.mv.destX, n.mv.destY, n.w, n.h, occupants);
+		std::sort(occupants.begin(), occupants.end());
+		occupants.erase(std::unique(occupants.begin(), occupants.end()), occupants.end());
+		for (uint64_t occ : occupants) {
+			if (occ == h) continue; // already sitting there -- no-op, no dependency
+			auto occNode = nodes.find(occ);
+			if (occNode == nodes.end()) {
+				result.diagnostics.push_back(
+					"move for handle " + std::to_string(h) + " -> tab " + std::to_string(n.mv.destTab) + " ("
+					+ std::to_string(n.mv.destX) + "," + std::to_string(n.mv.destY) + ") is currently occupied by handle "
+					+ std::to_string(occ) + ", which this plan never moves -- this move may still be rejected live");
+				continue;
+			}
+			occNode->second.dependents.push_back(h);
+			n.inDegree++;
+		}
+	}
+
+	// Kahn's algorithm, processed one full BFS wave ("layer") at a time
+	// rather than a plain FIFO: everything in `currentLayer` has its
+	// dependencies already satisfied by a STRICTLY EARLIER layer, never by
+	// another move in the same layer, so the whole layer is safe to hand to
+	// the live game as one unit regardless of how it batches/orders calls
+	// within it (see SequencedMoves::layerSizes in the header). A stall
+	// (`currentLayer` empty but nodes remain) means everything left forms
+	// one or more dependency cycles; break the first unresolved one by
+	// parking a member in a scratch cell -- see the header comment on
+	// SequenceMovesForLiveApply.
+	std::vector<uint64_t> currentLayer;
+	for (uint64_t h : order) {
+		if (!nodes[h].usable) { nodes[h].done = true; continue; }
+		if (nodes[h].inDegree == 0) currentLayer.push_back(h);
+	}
+
+	size_t processed = 0;
+	for (uint64_t h : order) if (nodes[h].done) ++processed;
+	int cyclesBroken = 0;
+
+	while (processed < order.size()) {
+		if (currentLayer.empty()) {
+			// Stalled: everything left forms one or more dependency cycles.
+			// A full stash sort can easily contain many DISJOINT cycles (a
+			// bunch of unrelated pairwise swaps, say), and they don't
+			// depend on each other at all -- so break ALL of them in this
+			// one pass, as a single scratch layer, instead of walking the
+			// order array over and over to peel off one cycle per stall.
+			// Breaking one member of a cycle can immediately zero out its
+			// own cycle-mate's inDegree (see the loop body below), so a
+			// node is only picked if it STILL has inDegree > 0 by the time
+			// this pass reaches it -- that keeps this to exactly one break
+			// per disjoint cycle, never two.
+			const size_t          processedBefore = processed;
+			std::vector<uint64_t> scratchLayer;
+			for (uint64_t h : order) {
+				Node& n = nodes[h];
+				if (n.done || n.broken || n.inDegree == 0) continue;
+
+				auto scratch = FindScratchCell(liveByTab, reservedByTab, tabCount, gridWidth, gridHeight, n.w, n.h);
+				if (!scratch) {
+					// No free cell exists to break this cycle with (only
+					// expected in an almost entirely full stash, or a
+					// pathological pile-up of many simultaneous cycles all
+					// competing for the same scarce large-item-sized gaps).
+					// Emit its ORIGINAL move anyway rather than silently
+					// dropping it: its real destination is still occupied by
+					// its cycle-mate, so the live game will very likely
+					// reject it, but ApplyMoves' own per-op logging will
+					// then say exactly that (with the real result code),
+					// which is far more useful than the item just quietly
+					// never moving with no trace of why.
+					result.diagnostics.push_back(
+						"could not break a dependency cycle involving handle " + std::to_string(h)
+						+ " -- no free scratch cell found; sending its move as-is, it will likely be rejected live");
+					result.layerSizes.push_back(1);
+					result.moves.push_back(n.mv);
+					n.done = true;
+					++processed;
+					continue;
+				}
+				const auto [scratchTab, scratchX, scratchY] = *scratch;
+
+				n.broken = true;
+				scratchLayer.push_back(h);
+				if (n.curTab != kUnknownTab) liveGrid(n.curTab).Clear(n.curX, n.curY, n.w, n.h);
+				liveGrid(scratchTab).Mark(scratchX, scratchY, n.w, n.h, h);
+				n.curTab = scratchTab;
+				n.curX   = scratchX;
+				n.curY   = scratchY;
+				n.scratchMove = PlannedMove { h, scratchTab, scratchX, scratchY };
+				for (uint64_t dep : n.dependents) {
+					Node& dn = nodes[dep];
+					if (--dn.inDegree == 0) currentLayer.push_back(dep);
+				}
+				// `n` itself is NOT done: its real move (n.mv, unchanged)
+				// still has its original inDegree and will be emitted
+				// normally, in a later layer, once whatever occupies its
+				// true destination clears.
+				++cyclesBroken;
+			}
+
+			if (!scratchLayer.empty()) {
+				result.layerSizes.push_back(static_cast<uint32_t>(scratchLayer.size()));
+				for (uint64_t h : scratchLayer) result.moves.push_back(nodes[h].scratchMove);
+			}
+
+			if (currentLayer.empty() && processed == processedBefore) {
+				// Safety net, not expected to trigger: this pass broke
+				// nothing, freed nothing, and gave up on nothing, so nothing
+				// will ever change from here (e.g. a dependency graph this
+				// function's own bookkeeping got wrong somewhere). Emit
+				// whatever's left using its ORIGINAL planned move (or, for
+				// an already-broken node still awaiting its real move, that
+				// real move) rather than looping forever or silently
+				// dropping items -- ApplyMoves' own retry is the backstop
+				// for whatever this leaves imperfect.
+				std::vector<uint64_t> leftover;
+				for (uint64_t h : order) if (!nodes[h].done) leftover.push_back(h);
+				if (leftover.empty()) break;
+				result.diagnostics.push_back(
+					std::to_string(leftover.size())
+					+ " move(s) could not be fully ordered (unexpected dependency shape); emitting them as-is");
+				result.layerSizes.push_back(static_cast<uint32_t>(leftover.size()));
+				for (uint64_t h : leftover) {
+					result.moves.push_back(nodes[h].mv);
+					nodes[h].done = true;
+					++processed;
+				}
+			}
+			continue;
+		}
+
+		std::vector<uint64_t> nextLayer;
+		for (uint64_t h : currentLayer) {
+			Node& n = nodes[h];
+			n.done  = true;
+			++processed;
+			result.moves.push_back(n.mv);
+			if (n.curTab != kUnknownTab) liveGrid(n.curTab).Clear(n.curX, n.curY, n.w, n.h);
+			liveGrid(n.mv.destTab).Mark(n.mv.destX, n.mv.destY, n.w, n.h, h);
+			n.curTab = n.mv.destTab;
+			n.curX   = n.mv.destX;
+			n.curY   = n.mv.destY;
+			for (uint64_t dep : n.dependents) {
+				Node& dn = nodes[dep];
+				if (--dn.inDegree == 0) nextLayer.push_back(dep);
+			}
+		}
+		result.layerSizes.push_back(static_cast<uint32_t>(currentLayer.size()));
+		currentLayer = std::move(nextLayer);
+	}
+
+	if (cyclesBroken > 0) {
+		result.diagnostics.push_back(std::to_string(cyclesBroken) + " dependency cycle(s) broken using a temporary scratch cell");
+	}
+
+	return result;
 }
 
 namespace {

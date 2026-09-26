@@ -412,12 +412,19 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 
 // --- Turning a plan into an item transaction --------------------------------
 
-auto ApplyMoves(const PluginContext* ctx, PlayerHandle player, const std::vector<RemoteStashSorting::PlannedMove>& moves, uint32_t* committedCount) -> Items::Result {
+auto ApplyMoves(const PluginContext* ctx, PlayerHandle player, const RemoteStashSorting::SequencedMoves& sequenced, uint32_t* committedCount)
+	-> Items::Result {
 	if (committedCount != nullptr) {
 		*committedCount = 0;
 	}
+	const auto& moves = sequenced.moves;
 	if (moves.empty()) {
 		return Items::Result::Success;
+	}
+
+	for (const auto& note : sequenced.diagnostics) {
+		const std::string msg = "remote-stash-sorting: move ordering: " + note;
+		ctx->LogWarn(msg.c_str());
 	}
 
 	std::vector<Items::ExistingItemOperation> ops;
@@ -436,31 +443,31 @@ auto ApplyMoves(const PluginContext* ctx, PlayerHandle player, const std::vector
 		ops.push_back(op);
 	}
 
-	if (ops.size() > Items::MaxExistingItemOperations) {
-		ctx->LogWarn(
-			"remote-stash-sorting: plan exceeds 4096 operations; it will be sent in several transactions and is NOT "
-			"atomic across all of them (see README).");
-	}
-
-	uint32_t       totalCommitted = 0;
-	Items::Result  worstResult    = Items::Result::Success; // first non-Success result seen, if any
+	uint32_t      totalCommitted = 0;
+	Items::Result worstResult    = Items::Result::Success; // first non-Success result seen, if any
 
 	// A single call to executeExistingItemTransaction is all-or-nothing (see
 	// ExistingItemTransactionResult's own doc comment: "committedOperationCount
 	// is zero on failure") -- so one operation this API rejects (e.g. an item
 	// it doesn't consider movable from wherever it actually is) sinks every
-	// other, otherwise-fine operation riding in the same call with it. A
-	// 3000+ item Auto Sort plan committing zero moves because of one bad item
-	// is exactly that failure mode, and the plain per-4096-chunk loop below
-	// had no way to tell "one poison operation" apart from "everything is
-	// broken." `attempt` isolates it instead: on any non-Success result it
-	// bisects the failing slice and retries each half separately, recursing
-	// down to individual operations when necessary, so the plan still commits
-	// everything it safely can and only the genuinely-rejected operation(s)
-	// are skipped (and logged by handle/destination, so which item and why is
-	// no longer a mystery next time this happens). Each Move destination is
-	// idempotent (an exact tab/x/y), so retrying a slice that may have
-	// partially applied despite reporting failure is harmless either way.
+	// other, otherwise-fine operation riding in the same call with it.
+	// `attempt` isolates it instead: on any non-Success result it bisects the
+	// failing slice and retries each half separately, recursing down to
+	// individual operations when necessary, logging exactly which item and
+	// why once isolated to one, so the rest of a chunk still commits
+	// everything it safely can. Each Move destination is idempotent (an
+	// exact tab/x/y), so retrying a slice that may have partially applied
+	// despite reporting failure is harmless either way.
+	//
+	// `sequenced` is grouped into dependency LAYERS (see
+	// SequenceMovesForLiveApply/SequencedMoves::layerSizes in
+	// sort_engine.hpp): every move in one layer is independent of every
+	// other move in that same layer, so bisecting/chunking freely WITHIN a
+	// layer is always safe -- but a layer must fully finish (whatever of it
+	// can commit, has) before the NEXT layer's calls start, since later
+	// layers depend on earlier ones having actually happened live. `attempt`
+	// itself doesn't need to know about layers at all; the outer loop below
+	// just never lets a `begin,end` range cross a layer boundary.
 	std::function<void(size_t, size_t)> attempt = [&](size_t begin, size_t end) {
 		if (begin >= end) {
 			return;
@@ -486,9 +493,6 @@ auto ApplyMoves(const PluginContext* ctx, PlayerHandle player, const std::vector
 		}
 
 		if (end - begin == 1) {
-			// Isolated to one operation: log exactly which item/destination
-			// the game rejected and why, then move on instead of losing the
-			// rest of an otherwise-good plan to it.
 			const auto& op = ops[begin];
 			char        msg[256];
 			std::snprintf(
@@ -506,11 +510,23 @@ auto ApplyMoves(const PluginContext* ctx, PlayerHandle player, const std::vector
 		attempt(mid, end);
 	};
 
-	size_t offset = 0;
-	while (offset < ops.size()) {
-		const size_t chunkSize = std::min<size_t>(Items::MaxExistingItemOperations, ops.size() - offset);
-		attempt(offset, offset + chunkSize);
-		offset += chunkSize;
+	size_t layerOffset = 0;
+	bool   loggedChunkWarning = false;
+	for (uint32_t layerSize : sequenced.layerSizes) {
+		const size_t layerEnd = layerOffset + layerSize;
+		if (!loggedChunkWarning && layerSize > Items::MaxExistingItemOperations) {
+			ctx->LogWarn(
+				"remote-stash-sorting: a single dependency layer exceeds 4096 operations; it will be sent in several "
+				"transactions and is NOT atomic across all of them (see README).");
+			loggedChunkWarning = true;
+		}
+		size_t offset = layerOffset;
+		while (offset < layerEnd) {
+			const size_t chunkSize = std::min<size_t>(Items::MaxExistingItemOperations, layerEnd - offset);
+			attempt(offset, offset + chunkSize);
+			offset += chunkSize;
+		}
+		layerOffset = layerEnd;
 	}
 
 	if (committedCount != nullptr) {
@@ -690,8 +706,22 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 		ctx->LogInfo("remote-stash-sorting: plan self-check found no colliding moves.");
 	}
 
+	// The plan above only guarantees a collision-free FINAL layout -- it says
+	// nothing about the order moves have to happen in live. A full Auto Sort
+	// repositions most of the stash, so most destinations are, at the moment
+	// naive plan order would try to move into them, still occupied by some
+	// OTHER item this same plan is about to move elsewhere; the live Move API
+	// rejects that with Conflict no matter how ApplyMoves chunks/bisects,
+	// since re-trying the SAME order never frees anything up. This resolves
+	// that dependency order up front (see sort_engine.hpp's own comment for
+	// the algorithm); ApplyMoves' own per-layer bisection stays as a backstop
+	// for anything this couldn't foresee (stale facts, a genuinely
+	// nonexistent tab, etc.), not the primary mechanism.
+	const auto sequenced =
+		RemoteStashSorting::SequenceMovesForLiveApply(state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight);
+
 	uint32_t   committed = 0;
-	const auto txnResult = ApplyMoves(ctx, player, outcome.moves, &committed);
+	const auto txnResult = ApplyMoves(ctx, player, sequenced, &committed);
 
 	char logMsg[320] {};
 	std::snprintf(
@@ -701,7 +731,7 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 		outcome.itemsSorted,
 		outcome.tabsUsed,
 		committed,
-		outcome.moves.size(),
+		sequenced.moves.size(),
 		static_cast<unsigned>(txnResult));
 	ctx->LogInfo(logMsg);
 
@@ -739,8 +769,15 @@ void __cdecl DoAddBlankPage(const PluginContext* ctx, void*) noexcept {
 		return;
 	}
 
+	// See DoAutoSort's own comment on SequenceMovesForLiveApply: a tab-shift
+	// like this one moves a whole chain of tabs back one slot, and the same
+	// "destination still occupied by another in-plan item" issue can apply
+	// here too, just at tab granularity instead of per-cell.
+	const auto sequenced =
+		RemoteStashSorting::SequenceMovesForLiveApply(state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight);
+
 	uint32_t   committed = 0;
-	const auto txnResult = ApplyMoves(ctx, player, outcome.moves, &committed);
+	const auto txnResult = ApplyMoves(ctx, player, sequenced, &committed);
 	if (txnResult == Items::Result::NotAuthoritative) {
 		QueueToast(ctx, UiLayouts::OutcomeMessage::MultiplayerClientUnsupported);
 		return;
@@ -777,8 +814,12 @@ void __cdecl DoRemoveCurrentPage(const PluginContext* ctx, void*) noexcept {
 		return;
 	}
 
+	// See DoAutoSort's own comment on SequenceMovesForLiveApply.
+	const auto sequenced =
+		RemoteStashSorting::SequenceMovesForLiveApply(state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight);
+
 	uint32_t   committed = 0;
-	const auto txnResult = ApplyMoves(ctx, player, outcome.moves, &committed);
+	const auto txnResult = ApplyMoves(ctx, player, sequenced, &committed);
 	if (txnResult == Items::Result::NotAuthoritative) {
 		QueueToast(ctx, UiLayouts::OutcomeMessage::MultiplayerClientUnsupported);
 		return;

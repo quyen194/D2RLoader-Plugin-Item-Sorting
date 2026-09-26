@@ -164,6 +164,86 @@ std::vector<std::string> DetectCollisions(
 	uint32_t                         gridWidth = 16,
 	uint32_t                         gridHeight = 13);
 
+// Turns a *planned* move list (which only has to be correct about final
+// positions -- see RunAutoSort/RunAutoSortWithPadding) into a live-safe
+// *execution* order.
+//
+// The planner places every item into a layout it builds fresh, category by
+// category, with no regard for what is CURRENTLY sitting in each destination
+// cell live in-game. Since a full Auto Sort typically repositions most or
+// all of the stash, a huge fraction of destinations are, at the moment
+// ApplyMoves would naively try to move into them, still occupied by some
+// OTHER item this same plan is also about to move elsewhere -- the live
+// Move API rejects that with Items::Result::Conflict, and no amount of
+// re-trying a single fixed order fixes it: item A can't move into B's old
+// slot until B has actually moved out first.
+//
+// This does what a save-editor byte-rewrite never had to: it collapses the
+// plan to one net move per handle (only the LAST planned move for a handle
+// is where it actually ends up -- same reasoning DetectCollisions already
+// uses), builds a dependency graph from *live* current occupancy (`items`)
+// against each move's destination footprint, and topologically sorts it so
+// that whichever item currently sits in a destination always moves out
+// first. A destination cell can depend on more than one occupant if the
+// item moving in is larger than 1x1 and straddles more than one currently
+// distinct item.
+//
+// A cycle (A wants B's spot, B wants A's spot -- or a longer loop of the
+// same shape) has no valid one-item-at-a-time order at all without a spare
+// cell, so one member of each cycle found is temporarily relocated to a
+// scratch cell (any cell this function can prove will never be touched by
+// anything else: not currently occupied by any live item, and not any
+// move's own final destination) to break the cycle, then moved on to its
+// real destination once the rest of the cycle has resolved. `diagnostics`
+// carries one human-readable note per such cycle break, per otherwise-
+// unresolvable dependency (something outside this plan is squatting on a
+// destination), and per cycle that could not be broken for lack of a free
+// scratch cell (vanishingly rare outside an almost-completely-full stash) --
+// all non-fatal; the caller logs them and applies whatever `moves` contains.
+//
+// Every entry in the returned `moves` is a *live* move: real ones (one per
+// input handle, verbatim) plus, only where a cycle needed breaking, one
+// extra synthetic "move to scratch" ahead of that handle's real move.
+// Applying them to the live game strictly in this order (still safe to
+// chunk/bisect on failure -- ApplyMoves' own retry stays as a backstop for
+// anything this couldn't foresee, e.g. stale facts) should encounter
+// Conflict only for genuinely unresolvable cases.
+struct SequencedMoves {
+	std::vector<PlannedMove> moves;
+	std::vector<std::string> diagnostics;
+
+	// `moves` grouped into topological layers: every move in one layer is
+	// independent of every OTHER move in that same layer (neither depends on
+	// the other), so a layer is safe to send to the live game as a single
+	// batch -- but a move can depend on one from an EARLIER layer, so layers
+	// must be applied to the live game strictly in order, only starting the
+	// next layer's call(s) once the previous layer's have actually
+	// committed. layerSizes.size() == number of layers, and its entries sum
+	// to moves.size(); layer i is moves[offset..offset+layerSizes[i]) where
+	// offset is the running sum of the sizes before it.
+	//
+	// This exists because the live SDK's own doc comment for
+	// ExistingItemTransactionResult is ambiguous about whether operations
+	// within a single transaction call can see each other's effects (it
+	// documents a `failureIndex`, suggesting in-order attempts, but also
+	// that committedOperationCount is zero on any failure, i.e. a full
+	// rollback) -- a caller that only cares about correctness, not
+	// squeezing every dependency into one call, should split on layer
+	// boundaries and never batch across them; how many of a layer's own
+	// moves it dares to combine into one call (all of them, one each, or
+	// something in between) is a call-batching decision for that caller
+	// (see plugin.cpp's ApplyMoves), not something this ordering makes for
+	// it.
+	std::vector<uint32_t> layerSizes;
+};
+
+SequencedMoves SequenceMovesForLiveApply(
+	const std::vector<ItemFacts>&   items,
+	const std::vector<PlannedMove>& moves,
+	uint32_t                        tabCount,
+	uint32_t                        gridWidth  = 16,
+	uint32_t                        gridHeight = 13);
+
 // "Add blank page": slide the nearest empty tab at or after `afterTab` so it
 // lands immediately after `afterTab`, by shifting every tab in between back
 // one slot (pure tab-content rotation, same trick as the save-editor's
