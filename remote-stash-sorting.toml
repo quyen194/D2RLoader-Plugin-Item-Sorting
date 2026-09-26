@@ -9,12 +9,9 @@ enabled = true
 # The SDK has no way to query how many active shared-stash tabs you have, so
 # this must be set by hand to match your actual shared stash. Auto Sort
 # fails cleanly (toast + log message) rather than guessing if this is too
-# low. Setting it too HIGH is NOT harmless: the padding pass and Add Blank
-# Page can mistake a tab number beyond your real stash for a genuinely empty
-# tab and rotate it into the layout, which the live game then rejects
-# per-item (see the README's "Known gaps" #3). Those rejections are isolated
-# and logged rather than breaking anything else, but the clean fix is to set
-# this to your exact real tab count -- when unsure, round DOWN, not up.
+# low. A too-high value has not been shown to be harmless either -- see the
+# README's "Known gaps" #3 for an open investigation into a handful of
+# per-item rejections that first looked like this but turned out not to be.
 shared_stash_tab_count = 200
 
 # Reserved leading tabs that Auto Sort and the padding pass never touch --

@@ -126,15 +126,14 @@ a config you've already edited. See the file's own comments for the full
 reference; the two settings you're most likely to need to change:
 
 - `shared_stash_tab_count` -- **must match your actual shared stash tab
-  count.** The SDK has no query for this (see "Known gaps" #3). Auto Sort
-  fails cleanly with a toast + log message if it's set too low. Setting it
-  too HIGH is **not** harmless either, despite what an earlier version of
-  this note said: the padding pass and Add Blank Page can rotate a
-  nonexistent tab number into the layout (see "Known gaps" #3), which the
-  live game then rejects per-item with `Result::Unsupported` -- isolated and
-  logged, nothing else in the plan is affected (see "Known gaps" #15), but
-  still avoidable. If you're not sure of the exact count, round DOWN, not
-  up.
+  count.** The SDK has no query for this (see "Known gaps" #3); Auto Sort
+  fails cleanly with a toast + log message if it's set too low. A live run
+  hit `Result::Unsupported` for a handful of items landing in the two
+  highest tabs the padding pass used, which first looked like this value
+  being set too high -- but the player confirmed their stash genuinely has
+  that many tabs, so the actual cause is still open (see "Known gaps" #3).
+  Until it's found, don't assume a too-high value is safe just because this
+  run's cause turned out to be something else.
 - `[[layout]]` entries -- one per category, in fill order, mirroring
   `SS_AUTO_LAYOUT` from the save-editor. `mode_id` must be one of:
   `set`, `uniqueGear`, `rareGear`, `magicGear`, `superiorGear`, `normalGear`,
@@ -320,29 +319,22 @@ here for review, same as the algorithm-level scope note below.
    `shared_stash_tab_count` config value (see "Config" above) -- there is no
    way to discover or validate this automatically.
 
-   Concretely, setting it too HIGH is not the harmless rounding error an
-   earlier version of this note claimed. `RunAutoSort`'s own category
-   placement treats running out of tabs as a hard, checked failure (fails
-   cleanly, whole plan aborted, toast + log) -- but the padding pass and
-   blank-tabs-at-start pass (`PadAutoLayoutBreathingRoom` /
-   `AddBlankTabsAtStart`, both built on `RotateEmptyTabTo`, see "Known gaps"
-   #13) have no equivalent check: they pick "the nearest tab with no items
-   in it" as a free tab to rotate into position, and a tab number that
-   doesn't really exist in the live stash looks *exactly* like a genuinely
-   empty real tab from here -- nothing ever appears there because the SDK
-   can't put anything there, not because it's actually free. A live run
-   confirmed this: with the count configured a few tabs higher than the
-   real stash size, the padding/blank-tab passes relabelled a handful of
-   items into those phantom tab numbers, and the live game rejected each
-   one with `Result::Unsupported`. Thanks to "Known gaps" #15's per-item
-   isolation this degrades gracefully -- a handful of clearly-logged,
-   individually-skipped items, with the rest of the plan committing
-   normally -- rather than corrupting anything, but the actual fix is
-   still to set this value to your exact real tab count. If you're unsure
-   of the exact number, round down: a too-low count fails loudly before
-   touching anything, a too-high one fails quietly and only tab-by-tab, in
-   the padding/blank-tab phases specifically (i.e. only near the very end
-   of the configured range, never in the category-sorted tabs themselves).
+   A live run on a 3616-item stash (config correctly set to the player's
+   real tab count -- 5 original tabs plus 195 added, 200 total) still hit
+   73 `Result::Unsupported` rejections, all landing in tabs 78 and 79
+   specifically, both reached only by the padding pass / Add Blank Page
+   (`PadAutoLayoutBreathingRoom` / `AddBlankTabsAtStart`, built on
+   `RotateEmptyTabTo`, see "Known gaps" #13), never by the category sort
+   itself (which only ever used the 76 tabs its layout needed). The first
+   hypothesis was that `RotateEmptyTabTo` had rotated a tab number beyond
+   the real live stash into the layout -- it can't tell a genuinely empty
+   real tab apart from one that simply doesn't exist, since both look
+   identical from here (nothing ever appears there) -- but that turned out
+   to be wrong: the player confirmed tab 79 is a real tab in their 200-tab
+   stash. **Root cause not yet found.** Whatever it is, it's isolated to
+   those two specific tab numbers, and thanks to "Known gaps" #15's
+   per-item isolation it doesn't affect anything else in the plan -- the
+   other 3543 operations commit normally regardless.
 
 4. **No SDK query for "which tab is currently displayed."** Worked around
    with a plugin-tracked "selected tab" pointer (starts at 0, moved with the
@@ -660,8 +652,8 @@ here for review, same as the algorithm-level scope note below.
     the convention already used by `MoveBlankTabAfter`/`PushBlankTabToEnd`
     elsewhere in this plugin. It also means `RotateEmptyTabTo` cannot tell
     a genuinely empty real tab apart from a tab number beyond the actual
-    live stash -- see "Known gaps" #3 for what that costs when
-    `shared_stash_tab_count` is configured too high.
+    live stash, in principle -- see "Known gaps" #3 for a live case that
+    looked like exactly this and turned out not to be.
 
 14. **Quality-tier gear categories, a dynamic "unclassified" catch-all,
     config hot-reload, and per-category `sort_keys`/`gear_groups` -- added
@@ -819,19 +811,16 @@ here for review, same as the algorithm-level scope note below.
     **Confirmed live**, on the same 3616-item stash this was diagnosed
     against: committed went from `1849/3616` to `3543/3616`, and every
     `Result::Conflict` rejection is gone -- the fix above works as designed.
-    The remaining 73 rejections were a *different*, narrower problem: 100%
-    `Result::Unsupported`, concentrated entirely in tabs 78 and 79 (both
-    beyond the 76 tabs the category sort itself used), produced by the
-    padding/blank-tabs-at-start passes reaching for what they believed were
-    two more empty tabs to rotate into position. This is the
-    `shared_stash_tab_count`-set-too-high problem described in "Known gaps"
-    #3 -- a *config* issue, not a bug in the sequencing fix above: those two
-    tab numbers don't actually exist in this player's real shared stash, so
-    every item the padding pass tried to relabel into them was correctly
-    rejected live. It's a good demonstration of this item's fix working
-    exactly as intended even for a failure it wasn't built for -- the 73
-    bad operations were isolated and individually logged, and every other
-    operation in the same plan still committed normally.
+    The remaining 73 rejections were a *different*, narrower problem (100%
+    `Result::Unsupported`, concentrated entirely in tabs 78 and 79, both
+    beyond the 76 tabs the category sort itself used) that is still under
+    investigation -- see "Known gaps" #3; it is not a `shared_stash_tab_
+    count` misconfiguration; the player confirmed their real tab count
+    genuinely covers both tabs. It's still a good demonstration of this
+    item's fix working exactly as intended even for a failure it wasn't
+    built for: the 73 bad operations were isolated and individually
+    logged, and every other operation in the same plan still committed
+    normally.
 
 ## Testing
 
