@@ -319,55 +319,87 @@ here for review, same as the algorithm-level scope note below.
    `shared_stash_tab_count` config value (see "Config" above) -- there is no
    way to discover or validate this automatically.
 
-   A live run on a 3616-item stash (config correctly set to the player's
-   real tab count -- 5 original tabs plus 195 added, 200 total) still hit
-   73 `Result::Unsupported` rejections, all landing in tabs 78 and 79
-   specifically, both reached only by the padding pass / Add Blank Page
+   A live run on a 3853-move plan still hit 73 `Result::Unsupported`
+   rejections, landing in the two tabs the padding pass / Add Blank Page
    (`PadAutoLayoutBreathingRoom` / `AddBlankTabsAtStart`, built on
-   `RotateEmptyTabTo`, see "Known gaps" #13), never by the category sort
-   itself (which only ever used the 76 tabs its layout needed). The first
-   hypothesis was that `RotateEmptyTabTo` had rotated a tab number beyond
-   the real live stash into the layout -- it can't tell a genuinely empty
-   real tab apart from one that simply doesn't exist, since both look
-   identical from here (nothing ever appears there) -- but that turned out
-   to be wrong: the player confirmed tab 79 is a real tab in their 200-tab
-   stash.
+   `RotateEmptyTabTo`, see "Known gaps" #13) shifted the "unclassified"
+   catch-all category into -- never the category sort itself. The tab-count
+   theory above was wrong (player confirmed all 200 tabs are real), and a
+   follow-up run with the rejection log now printing each item's code and
+   category (added to `ApplyMoves` in `plugin.cpp`) **confirmed the
+   catch-all-item hypothesis outright**: every one of the 73 rejections was
+   a `quality == 0` item -- gems, runes, quest/essence items, and (a second,
+   initially-confusing cluster) this mod's own crafting materials (Orbs of
+   Conversion/Corruption/Renewal/Socketing/Shadows, Uber Ancient Summon
+   Materials, Worldstone Shards, Rune/Jewel Pliers, Keys of
+   Destruction/Hate, Gem Cluster, Experience Potion). That second cluster
+   logs as `gear(slot=0)` rather than `unclassified(...)` only because
+   `item_classification_data.hpp`'s generator -- faithfully matching the
+   save-editor's own `_ssIsGearItem` -- calls anything that isn't
+   specifically a charm/jewel/ring/amulet/gem/socket-filler "gear", even
+   when (as here) it also fails to match any of the 23 real gear slots and
+   ends up `GearSlot::None`. Both clusters are the exact same underlying
+   thing: a `quality == 0` item with no dedicated sort category, swept into
+   `Mode::catchAll` ("unclassified") along with everything else.
 
-   **Leading hypothesis (pending direct confirmation): this has nothing to
-   do with the destination tab at all.** Replaying the exact same
-   classification table and config offline, against a real export of the
-   player's stash parsed with the save-editor's own item logic (not a
-   guess), reproduces the live log's category placement almost exactly --
-   every category's tab range and item count matches to within a couple of
-   items. Under that replay, tabs 78/79 turn out to be nothing more than
-   wherever the "unclassified" catch-all category (`Mode::catchAll` in
-   `RunAutoSort`, which claims every item no other category's stream
-   matches -- gems, runes, potions, quest items, and anything
-   `Classification::Classify` doesn't recognize) landed after the
-   padding/blank-tab shift. In both the original 3616-item run and a
-   second live run after the player littered a health/mana potion into
-   every tab as a test, 100% of the items whose planned destination fell
-   in that catch-all tab -- and nothing else -- were exactly this kind of
-   item: gems, runes, essence/quest items (Baal's Eye, Diablo's Horn,
-   Mephisto's Brain/Animus, Worldstone Shards, Keys of
-   Terror/Destruction/Hate, and similar), and the test potions themselves.
-   Ordinary gear, charms, jewels, rings, and amulets were never among the
-   rejected items in either run. This points at something the live
-   `ExistingItemTransaction` Move call does not support for
-   Misc.txt-classified items specifically, independent of where they're
-   being sent -- not a tab validity problem at all.
+   **What's now ruled out:** a capacity/tab-allocation bug in
+   `sort_engine.cpp` itself. Replaying the identical algorithm offline
+   against a real export of the post-run stash (same classification table,
+   same config, same occupancy) places all ~238 `quality == 0` items
+   cleanly into just 2 tabs (1 reserved + 1 borrowed) with room to spare --
+   it never reproduces a shortfall. The planning/bin-packing logic is not
+   the problem.
 
-   **Not yet fully confirmed**, because the live log only ever recorded a
-   handle and a result code, not what kind of item it was. This session
-   added the item's code and category to that rejection log itself
-   (`ApplyMoves`' per-operation log line, `plugin.cpp`) so the next real
-   run either confirms this outright or rules it out. If confirmed, this
-   is very likely a live-game/SDK limitation on moving these item types via
-   `ExistingItemTransaction`, not something fixable in this plugin --
-   though thanks to "Known gaps" #15's per-item isolation it already
+   **Leading hypothesis now:** something specific to the *live application*
+   of moves into these particular borrowed/padded-in tabs -- most likely
+   that a tab reached only by borrowing (never visited by the player or
+   "opened" in the live UI) isn't fully backed/materialized on the game's
+   side yet, so `ExistingItemTransaction` rejects a Move *into* it with
+   `Unsupported` regardless of what the offline simulation thinks is free
+   there. This is a cheap, concrete thing to test directly: before running
+   Auto Sort, scroll through and visit every shared-stash tab at least once
+   in-game (especially the last few, highest-numbered ones), then run Auto
+   Sort again and see whether the same 73-ish items still get rejected. If
+   visiting the tabs first makes the rejections disappear, this is a
+   real live-only tab-materialization quirk (workaroundable, e.g. by having
+   the plugin itself "touch"/select each destination tab before moving
+   items into it); if they still fail, the cause is something else again.
+
+   Either way, thanks to "Known gaps" #15's per-item isolation this already
    degrades as gracefully as this class of problem can: a handful of
    individually-logged, isolated rejections, with the rest of the plan
    committing normally.
+
+   **Separate, unrelated bug found while chasing this one:** a Set-quality
+   item can sit forever in its original spot, untouched by Auto Sort, with
+   *no* rejection ever logged for it at all -- because it was never even
+   added to a category's plan in the first place. `plugin.cpp` only fills
+   `ItemFacts::setGroupName` (`CollectSharedStashItem`) via
+   `Classification::SetGroupForRow(item->qualityRecordId)`, and
+   `sort_engine.cpp`'s "set" category's `match()` requires that name to be
+   non-empty (see its own comment: an unresolved set item is deliberately
+   "treated the same as a completely unknown item" and left alone, on
+   purpose, to avoid planning a move for an item whose group is unknown).
+   A live report of exactly this -- a Grim Helm ("Natalya's Odium" per the
+   save-editor's own parse of the very same `.d2i` file, using its `setId`
+   field) sitting untouched at its original tab across a full Auto Sort run
+   that clearly ran the "set" category and placed hundreds of *other* set
+   items successfully -- confirms `SetGroupForRow` returned "" for this
+   item live, even though `item_classification_data.hpp`'s generated
+   `kSetGroupByRow` table does contain 4 rows for "Natalya's Odium" (rows
+   63-66, sourced from this same save-editor's bundled `setitems.txt`), so
+   the table isn't simply missing that set's name outright. Two rival
+   explanations, both untestable offline because `qualityRecordId` is a
+   live-SDK-internal value with no equivalent in a `.d2i` file: either the
+   live game's actual row numbering for `setitems.txt` has drifted from
+   the row order in this repo's bundled reference copy (e.g. the
+   Reimagined mod adding/reordering set rows elsewhere in the table shifts
+   every row after that point, including Natalya's), or `qualityRecordId`
+   itself means something subtly different than "this row, 1:1" for some
+   items. `CollectSharedStashItem` now logs the item's code and its raw
+   `qualityRecordId` whenever this lookup comes back empty, so the next
+   live run will show the actual number and let this be pinned down
+   precisely instead of guessed at.
 
 4. **No SDK query for "which tab is currently displayed."** Worked around
    with a plugin-tracked "selected tab" pointer (starts at 0, moved with the

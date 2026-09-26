@@ -265,6 +265,21 @@ Config LoadConfig(const PluginContext* ctx) {
 
 // --- Reading the live shared stash into ItemFacts --------------------------
 
+// Shared by the set-group diagnostic below and the move-rejection log
+// further down (ApplyMoves) -- unpacks a D2RL::Items::MakeItemCode-style
+// little-endian uint32 back into its up-to-4-char text form for logging.
+std::string UnpackItemCode(uint32_t packedCode) {
+	char text[5] {};
+	for (int i = 0; i < 4; ++i) {
+		text[i] = static_cast<char>((packedCode >> (8 * i)) & 0xFF);
+	}
+	std::string result(text);
+	while (!result.empty() && result.back() == ' ') {
+		result.pop_back();
+	}
+	return result;
+}
+
 struct EnumState {
 	std::vector<RemoteStashSorting::ItemFacts> facts;
 
@@ -279,7 +294,7 @@ struct EnumState {
 	std::vector<uint32_t> sampleUnclassifiedCodes;
 };
 
-auto __cdecl CollectSharedStashItem(const PluginContext*, const Items::ItemInfo* item, void* userData) noexcept -> Inventory::IterationAction {
+auto __cdecl CollectSharedStashItem(const PluginContext* ctx, const Items::ItemInfo* item, void* userData) noexcept -> Inventory::IterationAction {
 	auto* state = static_cast<EnumState*>(userData);
 	if (state == nullptr || item == nullptr || item->structSize < Items::ItemInfoRequiredSize) {
 		return Inventory::IterationAction::Continue;
@@ -323,6 +338,36 @@ auto __cdecl CollectSharedStashItem(const PluginContext*, const Items::ItemInfo*
 	if (item->quality == Items::Quality::Set) {
 		fact.setId        = item->qualityRecordId;
 		fact.setGroupName = RemoteStashSorting::Classification::SetGroupForRow(item->qualityRecordId);
+
+		// Diagnostic for a live report: a specific set item (a Grim Helm,
+		// qualityRecordId pointing at "Natalya's Odium") never got moved by
+		// Auto Sort despite the "set" category clearly running and placing
+		// hundreds of *other* set items successfully. item_classification.hpp's
+		// kSetGroupByRow table (item_classification_data.hpp) DOES contain 4
+		// rows for "Natalya's Odium", so the table isn't simply missing that
+		// set's name -- but SetGroupForRow() also returns "" when
+		// qualityRecordId is negative or falls outside the table's own
+		// [0, 456) row range, and sort_engine.cpp's "set" mode treats an empty
+		// setGroupName as "same as a completely unknown item": left in place,
+		// forever, with no warning and no move-rejection log line either (it
+		// is simply never added to any category's plan). Logging the raw
+		// qualityRecordId here -- for every Set-quality item whose lookup came
+		// back empty -- is what will finally show whether this is an
+		// out-of-range/off-by-one index into kSetGroupByRow (a genuine data
+		// gap in that generated table) or something else entirely (e.g. a
+		// qualityRecordId the live SDK assigns that this table's row layout
+		// was never built to represent). Not yet confirmed -- see README
+		// "Known gaps" #3.
+		if (fact.setGroupName.empty() && ctx != nullptr) {
+			char msg[224];
+			std::snprintf(
+				msg, sizeof(msg),
+				"remote-stash-sorting: set item handle %llu (code='%s') has qualityRecordId=%d, which "
+				"could not be mapped to a set name; Auto Sort will leave it exactly where it is (see "
+				"README Known gaps #3).",
+				static_cast<unsigned long long>(item->handle), UnpackItemCode(item->code).c_str(), item->qualityRecordId);
+			ctx->LogWarn(msg);
+		}
 	}
 
 	state->facts.push_back(std::move(fact));
@@ -422,18 +467,9 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 // (a potion, gem, rune, or quest item -- see README "Known gaps" #3), never
 // on ordinary gear/charm/jewel/ring/amulet. This line is what the next real
 // run needs to confirm or rule that out for good, instead of inferring it
-// from tab numbers after the fact.
-std::string UnpackItemCode(uint32_t packedCode) {
-	char text[5] {};
-	for (int i = 0; i < 4; ++i) {
-		text[i] = static_cast<char>((packedCode >> (8 * i)) & 0xFF);
-	}
-	std::string result(text);
-	while (!result.empty() && result.back() == ' ') {
-		result.pop_back();
-	}
-	return result;
-}
+// from tab numbers after the fact. (UnpackItemCode itself now lives above,
+// next to CollectSharedStashItem, since the set-group diagnostic there needs
+// it too.)
 
 auto ApplyMoves(
 	const PluginContext* ctx, PlayerHandle player, const RemoteStashSorting::SequencedMoves& sequenced,
