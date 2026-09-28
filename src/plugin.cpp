@@ -57,11 +57,10 @@ const ResourceService*    g_resources    = nullptr;
 const WidgetService*      g_widgets      = nullptr;
 const SharedEventService* g_sharedEvents = nullptr;
 
-Panels::ChildLayoutHandle   g_buttonsChildLayout = Panels::InvalidChildLayoutHandle;
 Panels::RegistrationHandle  g_toastPanel         = Panels::InvalidHandle;
 SharedEvents::ListenerHandle g_uiMessageListener = SharedEvents::InvalidHandle;
 
-// Five invisible (1x1) "trigger" panels, one per button. See the "Known
+// Three invisible (1x1) "trigger" panels, one per button. See the "Known
 // gaps" #6 iteration 7 note in plugin.cpp's OnUiMessage: a button's
 // onClickMessage can only target a small set of D2R-native "message
 // channels" (PanelManager is one); a plugin-invented target string is
@@ -72,8 +71,6 @@ SharedEvents::ListenerHandle g_uiMessageListener = SharedEvents::InvalidHandle;
 Panels::RegistrationHandle g_actionAutoSortPanel          = Panels::InvalidHandle;
 Panels::RegistrationHandle g_actionAddBlankPagePanel      = Panels::InvalidHandle;
 Panels::RegistrationHandle g_actionRemoveCurrentPagePanel = Panels::InvalidHandle;
-Panels::RegistrationHandle g_actionPrevTabPanel           = Panels::InvalidHandle;
-Panels::RegistrationHandle g_actionNextTabPanel           = Panels::InvalidHandle;
 
 // The SDK has no query for "which shared-stash tab is on screen right now"
 // or "how many active shared-stash tabs exist" (see README "Known gaps").
@@ -83,6 +80,21 @@ Panels::RegistrationHandle g_actionNextTabPanel           = Panels::InvalidHandl
 // around with the shared_stash_tab_count config value below, which the user
 // must set to match their actual stash.
 std::atomic<uint32_t> g_selectedTab { 0 };
+
+// Whether g_selectedTab is known to match the shared-stash page D2R is
+// showing right now. The SDK cannot read the page directly (WidgetService has
+// no getter for BankExpansionLayout's CurrentSharedStashText -- getInputText
+// returns Unsupported on a TextBoxWidget, verified live), so the page is
+// tracked from events instead:
+//   - ItemTooltipEvent on a shared-stash item: sets the page exactly
+//     (ItemInfo::sharedStashPage of the hovered item);
+//   - BankPanelMessage:SharedStashRight / SharedStashLeft UiMessages (the
+//     native page arrows, verified live): +1 / -1 from a known page;
+//   - PanelManager:OpenPanel:BankExpansionLayout (stash opened): unknown
+//     again until the next hover, since D2R may not reopen on the same page.
+// Add Blank Page / Remove Current Page refuse to run while this is false.
+std::atomic<bool> g_selectedTabKnown { false };
+SharedEvents::ListenerHandle g_tooltipListener = SharedEvents::InvalidHandle;
 
 struct Config {
 	bool                                        enabled    = true;
@@ -913,7 +925,7 @@ void __cdecl DoAddBlankPage(const PluginContext* ctx, void*) noexcept {
 
 	const auto outcome = RemoteStashSorting::MoveBlankTabAfter(state.facts, g_selectedTab.load(), g_config.tabCount);
 	if (!outcome.ok) {
-		const std::string logMsg = "remote-stash-sorting: add blank page failed: " + outcome.error;
+		const std::string logMsg = "remote-stash-sorting: add blank page after page " + std::to_string(g_selectedTab.load() + 1) + " failed: " + outcome.error;
 		ctx->LogWarn(logMsg.c_str());
 		QueueToast(ctx, UiLayouts::OutcomeMessage::NoBlankTab);
 		return;
@@ -936,7 +948,12 @@ void __cdecl DoAddBlankPage(const PluginContext* ctx, void*) noexcept {
 		QueueToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		return;
 	}
-	g_selectedTab.store(outcome.blankTab);
+	{
+		char buf[200];
+		std::snprintf(buf, sizeof(buf), "remote-stash-sorting: add blank page after page %u: blank is now page %u; committed %u/%zu move(s).",
+		               g_selectedTab.load() + 1, outcome.blankTab + 1, committed, sequenced.moves.size());
+		ctx->LogInfo(buf);
+	}
 	QueueToast(ctx, UiLayouts::OutcomeMessage::BlankMoved);
 }
 
@@ -957,7 +974,7 @@ void __cdecl DoRemoveCurrentPage(const PluginContext* ctx, void*) noexcept {
 
 	const auto outcome = RemoteStashSorting::PushBlankTabToEnd(state.facts, g_selectedTab.load(), g_config.tabCount);
 	if (!outcome.ok) {
-		const std::string logMsg = "remote-stash-sorting: remove current page failed: " + outcome.error;
+		const std::string logMsg = "remote-stash-sorting: remove page " + std::to_string(g_selectedTab.load() + 1) + " failed: " + outcome.error;
 		ctx->LogWarn(logMsg.c_str());
 		const auto msg = outcome.error.find("out of range") != std::string::npos ? UiLayouts::OutcomeMessage::OutOfRange : UiLayouts::OutcomeMessage::CurrentNotEmpty;
 		QueueToast(ctx, msg);
@@ -978,75 +995,90 @@ void __cdecl DoRemoveCurrentPage(const PluginContext* ctx, void*) noexcept {
 		QueueToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		return;
 	}
+	{
+		char buf[200];
+		std::snprintf(buf, sizeof(buf), "remote-stash-sorting: removed empty page %u (moved to the end); committed %u/%zu move(s).",
+		               g_selectedTab.load() + 1, committed, sequenced.moves.size());
+		ctx->LogInfo(buf);
+	}
 	QueueToast(ctx, UiLayouts::OutcomeMessage::PageRemoved);
 }
 
-// --- UI message listener (button clicks) --------------------------------
+// --- On-screen shared-stash page tracking --------------------------------
+// See the g_selectedTabKnown comment near the top of this file.
 
-// Debug aid for "Known gaps" #6/#7: logs the live, engine-resolved rect of
-// the button strip and each of its five buttons. WidgetService::getWidgetRect
-// reports coordinates local to each widget's parent, so this is ground truth
-// from the engine instead of another screenshot-pixel guess. Called whenever
-// one of our own buttons is clicked (cheap -- user-triggered, not per-frame).
-bool LogButtonStripRects(const PluginContext* ctx) {
-	if (ctx == nullptr || g_widgets == nullptr) {
-		return false;
-	}
-
-	Widgets::WidgetHandle root = Widgets::InvalidHandle;
-	if (g_widgets->findPanel(ctx, "remote-stash-sorting/StashTools", &root) != Widgets::Result::Success) {
-		// Silent -- called speculatively on every UiMessage until the
-		// PlayerInventory child layout actually exists (see the
-		// s_loggedRectsOnce call site in OnUiMessage below), so logging a
-		// failure here would spam a line per MouseMove before the player is
-		// ever in a game.
-		return false;
-	}
-
-	Widgets::Rect rootRect {};
-	if (g_widgets->getWidgetRect(ctx, root, &rootRect) == Widgets::Result::Success) {
-		char buf[160];
-		std::snprintf(buf, sizeof(buf), "remote-stash-sorting: debug: StashTools rect (local to PlayerInventory) = x=%d y=%d w=%d h=%d",
-		               rootRect.x, rootRect.y, rootRect.width, rootRect.height);
+void SetTrackedPage(const PluginContext* ctx, uint32_t page, const char* reason) {
+	const bool     wasKnown = g_selectedTabKnown.load();
+	const uint32_t previous = g_selectedTab.load();
+	g_selectedTab.store(page);
+	g_selectedTabKnown.store(true);
+	if (ctx != nullptr && (!wasKnown || previous != page)) {
+		char buf[200];
+		std::snprintf(buf, sizeof(buf), "remote-stash-sorting: on-screen shared page is now %u (%s).", page + 1, reason);
 		ctx->LogInfo(buf);
-	} else {
-		ctx->LogInfo("remote-stash-sorting: debug: getWidgetRect failed for StashTools root.");
 	}
-
-	static constexpr const char* kButtonNames[] = {
-		"AutoSortButton", "AddBlankPageButton", "RemoveCurrentPageButton", "PrevTabButton", "NextTabButton",
-	};
-	for (const char* name : kButtonNames) {
-		Widgets::WidgetHandle w = Widgets::InvalidHandle;
-		if (g_widgets->findWidget(ctx, root, name, &w) != Widgets::Result::Success) {
-			continue;
-		}
-		Widgets::Rect r {};
-		if (g_widgets->getWidgetRect(ctx, w, &r) == Widgets::Result::Success) {
-			char buf[160];
-			std::snprintf(buf, sizeof(buf), "remote-stash-sorting: debug: %s rect (local to StashTools) = x=%d y=%d w=%d h=%d",
-			               name, r.x, r.y, r.width, r.height);
-			ctx->LogInfo(buf);
-		}
-	}
-	return true;
 }
+
+void MarkPageUnknown(const PluginContext* ctx, const char* reason) {
+	if (!g_selectedTabKnown.exchange(false)) {
+		return;
+	}
+	if (ctx != nullptr) {
+		const std::string msg = std::string("remote-stash-sorting: on-screen shared page is unknown until an item on it is hovered (") + reason + ").";
+		ctx->LogInfo(msg.c_str());
+	}
+}
+
+// Called for every UiMessage (text may be null for these native messages).
+void TrackStashNavigation(const PluginContext* ctx, const char* target, const char* command, const char* text) {
+	if (std::strcmp(target, "BankPanelMessage") == 0) {
+		const bool right = std::strcmp(command, "SharedStashRight") == 0;
+		const bool left  = std::strcmp(command, "SharedStashLeft") == 0;
+		if ((!right && !left) || !g_selectedTabKnown.load()) {
+			return;
+		}
+		const uint32_t current = g_selectedTab.load();
+		const uint32_t maxTab  = g_config.tabCount == 0 ? 0 : g_config.tabCount - 1;
+		// At either end D2R may clamp or wrap -- not verified, so don't guess.
+		if (right && current >= maxTab) {
+			MarkPageUnknown(ctx, "right arrow on the last page");
+		} else if (left && current == 0) {
+			MarkPageUnknown(ctx, "left arrow on the first page");
+		} else {
+			SetTrackedPage(ctx, right ? current + 1 : current - 1, right ? "page arrow right" : "page arrow left");
+		}
+		return;
+	}
+	if (std::strcmp(target, "PanelManager") == 0 && std::strcmp(command, "OpenPanel") == 0 && text != nullptr
+		&& std::strcmp(text, "BankExpansionLayout") == 0) {
+		MarkPageUnknown(ctx, "stash opened");
+	}
+}
+
+// Contributes no tooltip text -- only used to learn which shared-stash page
+// is on screen from the item under the cursor. Runs on the UI thread.
+void __cdecl OnItemTooltip(const PluginContext* ctx, SharedEvents::ItemTooltipEvent* event, void*) noexcept {
+	if (ctx == nullptr || event == nullptr || event->structSize < SharedEvents::ItemTooltipEventRequiredSize || g_items == nullptr) {
+		return;
+	}
+	Items::ItemInfo info {};
+	info.structSize = Items::ItemInfoSize;
+	if (g_items->getItemInfo(ctx, event->item, &info) != Items::Result::Success) {
+		return;
+	}
+	if (info.container != Items::ItemContainer::SharedStash || info.sharedStashPage == UINT32_MAX) {
+		return;
+	}
+	SetTrackedPage(ctx, info.sharedStashPage, "hovered a shared-stash item");
+}
+
+// --- UI message listener (button clicks) --------------------------------
 
 auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessageEvent* event, void*) noexcept -> SharedEvents::UiMessageAction {
 	namespace UiLayouts = RemoteStashSorting::UiLayouts;
 
 	if (ctx == nullptr || event == nullptr || event->structSize < SharedEvents::UiMessageEventRequiredSize) {
 		return SharedEvents::UiMessageAction::Continue;
-	}
-
-	// Fires once, the first time any UiMessage arrives after the StashTools
-	// child layout actually exists -- not gated on our own target, since
-	// that filter is exactly what this diagnostic exists to debug (gating on
-	// it here would mean it never runs at all). Cheap: a couple of
-	// findPanel/findWidget calls, and it stops retrying once it succeeds.
-	static bool s_loggedRectsOnce = false;
-	if (!s_loggedRectsOnce) {
-		s_loggedRectsOnce = LogButtonStripRects(ctx);
 	}
 
 	// Debug aid for "Known gaps" #6/#7: with debug_log_ui_messages = true in
@@ -1064,19 +1096,21 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 		ctx->LogInfo(buf);
 	}
 
+	if (event->target != nullptr && event->command != nullptr) {
+		TrackStashNavigation(ctx, event->target, event->command, event->text);
+	}
+
 	if (event->target == nullptr || event->command == nullptr || event->text == nullptr) {
 		return SharedEvents::UiMessageAction::Continue;
 	}
 
 	// Only D2R-native "PanelManager:TogglePanel" messages against one of our
-	// five dedicated trigger panels are ours to handle -- see the trigger-
+	// three dedicated trigger panels are ours to handle -- see the trigger-
 	// panel comment on the g_action*Panel globals above for why buttons are
 	// wired this way instead of a plugin-invented onClickMessage target.
 	if (std::strcmp(event->target, "PanelManager") != 0 || std::strcmp(event->command, "TogglePanel") != 0) {
 		return SharedEvents::UiMessageAction::Continue;
 	}
-
-	(void)LogButtonStripRects(ctx);
 
 	struct ActionBinding {
 		const char*                logicalName;
@@ -1086,8 +1120,6 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 		{ "remote-stash-sorting/ActionAutoSort", g_actionAutoSortPanel },
 		{ "remote-stash-sorting/ActionAddBlankPage", g_actionAddBlankPagePanel },
 		{ "remote-stash-sorting/ActionRemoveCurrentPage", g_actionRemoveCurrentPagePanel },
-		{ "remote-stash-sorting/ActionPrevTab", g_actionPrevTabPanel },
-		{ "remote-stash-sorting/ActionNextTab", g_actionNextTabPanel },
 	};
 	const ActionBinding* matched = nullptr;
 	for (const ActionBinding& binding : bindings) {
@@ -1114,6 +1146,11 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 		} else if (g_threads->runOnGameThread(ctx, DoAutoSort, nullptr) != Threads::Result::Success) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		}
+	} else if ((std::strcmp(matched->logicalName, "remote-stash-sorting/ActionAddBlankPage") == 0
+				   || std::strcmp(matched->logicalName, "remote-stash-sorting/ActionRemoveCurrentPage") == 0)
+			   && !g_selectedTabKnown.load()) {
+		ctx->LogInfo("remote-stash-sorting: page action skipped -- the on-screen shared page is unknown (hover an item on it first).");
+		ShowToast(ctx, UiLayouts::OutcomeMessage::PageUnknown);
 	} else if (std::strcmp(matched->logicalName, "remote-stash-sorting/ActionAddBlankPage") == 0) {
 		if (g_threads->runOnGameThread(ctx, DoAddBlankPage, nullptr) != Threads::Result::Success) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::InternalError);
@@ -1122,15 +1159,6 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 		if (g_threads->runOnGameThread(ctx, DoRemoveCurrentPage, nullptr) != Threads::Result::Success) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		}
-	} else if (std::strcmp(matched->logicalName, "remote-stash-sorting/ActionPrevTab") == 0) {
-		const uint32_t current = g_selectedTab.load();
-		g_selectedTab.store(current == 0 ? 0 : current - 1);
-		ShowToast(ctx, UiLayouts::OutcomeMessage::TabSelected);
-	} else if (std::strcmp(matched->logicalName, "remote-stash-sorting/ActionNextTab") == 0) {
-		const uint32_t current = g_selectedTab.load();
-		const uint32_t maxTab  = g_config.tabCount == 0 ? 0 : g_config.tabCount - 1;
-		g_selectedTab.store(current >= maxTab ? maxTab : current + 1);
-		ShowToast(ctx, UiLayouts::OutcomeMessage::TabSelected);
 	}
 
 	return SharedEvents::UiMessageAction::Consume;
@@ -1184,26 +1212,6 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 
 	g_config = LoadConfig(context);
 
-	// Button strip, attached to the stock PlayerInventory panel. Its JSON
-	// (coordinates, sprite references, tooltip string-table keys) and its
-	// button_mold/charminvbutton sprites all live as real files in the
-	// d2rl-remote-stash-sorting.mpq companion folder beside this DLL now
-	// (see ui_layouts.hpp "Child layout" comment) -- D2RCore discovers a
-	// "d2rl-<plugin-id>.mpq" companion and its
-	// "data/global/ui/layouts/<plugin-id>/<local-id>hd.json" layout on its
-	// own (see PluginSDK README "Resources and Companion MPQs" and
-	// CMakeLists.txt), so no ResourceService::registerResource call is
-	// needed here for it -- just attach it by localId below.
-	const Panels::ChildLayoutRegistration buttonsRegistration {
-		.structSize = Panels::ChildLayoutRegistrationSize,
-		.stockPanel = Panels::StockPanel::PlayerInventory,
-		.localId    = "StashTools",
-	};
-	if (g_panels->registerChildLayout(context, &buttonsRegistration, &g_buttonsChildLayout) != Panels::Result::Success) {
-		context->LogError("remote-stash-sorting: could not register the button strip on PlayerInventory.");
-		return false;
-	}
-
 	// Toast panel (built at runtime -- see ui_layouts.hpp).
 	const std::string toastJson = UiLayouts::BuildToastLayoutJson();
 	const Resources::ResourceRegistration toastResource {
@@ -1228,7 +1236,7 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 		return false;
 	}
 
-	// Five invisible trigger panels, one per button -- see the g_action*Panel
+	// Three invisible trigger panels, one per button -- see the g_action*Panel
 	// declarations near the top of this file for why. Each layout file is
 	// data/global/ui/layouts/remote-stash-sorting/Action<Name>hd.json in the
 	// companion mpq, a 1x1 Panel with no children.
@@ -1240,8 +1248,6 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 		{ "ActionAutoSort", &g_actionAutoSortPanel },
 		{ "ActionAddBlankPage", &g_actionAddBlankPagePanel },
 		{ "ActionRemoveCurrentPage", &g_actionRemoveCurrentPagePanel },
-		{ "ActionPrevTab", &g_actionPrevTabPanel },
-		{ "ActionNextTab", &g_actionNextTabPanel },
 	};
 	for (const ActionPanelSetup& setup : actionPanels) {
 		const Panels::PanelRegistration registration {
@@ -1261,6 +1267,17 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 	if (g_sharedEvents->registerUiMessageListener(context, &listener, &g_uiMessageListener) != SharedEvents::Result::Success) {
 		context->LogError("remote-stash-sorting: could not register the UI message listener.");
 		return false;
+	}
+
+	const SharedEvents::ItemTooltipListener tooltipListener {
+		.structSize = SharedEvents::ItemTooltipListenerSize,
+		.region     = SharedEvents::ItemTooltipRegion::Description,
+		.position   = SharedEvents::ItemTooltipPosition::Bottom,
+		.fallback   = SharedEvents::ItemTooltipFallback::Omit,
+		.callback   = OnItemTooltip,
+	};
+	if (g_sharedEvents->registerItemTooltipListener(context, &tooltipListener, &g_tooltipListener) != SharedEvents::Result::Success) {
+		context->LogWarn("remote-stash-sorting: could not register the item tooltip listener; the on-screen page can only be set with the page arrows / plugin buttons.");
 	}
 
 	context->LogInfo("remote-stash-sorting: loaded.");

@@ -539,6 +539,20 @@ here for review, same as the algorithm-level scope note below.
    straightforward -- the plugin already isolates "what tab is selected"
    behind `g_selectedTab`.
 
+   **Update (live-verified):** the page is now tracked from events instead of
+   the `<`/`>` buttons alone. `WidgetService` still can't read it
+   (`getInputText` on `BankExpansionLayout`'s `CurrentSharedStashText`
+   TextBoxWidget returns `Unsupported`; `findWidget`/`getWidgetRect` return
+   identical results whichever stash tab is selected), but D2R broadcasts
+   `BankPanelMessage:SharedStashRight` / `SharedStashLeft` for the native page
+   arrows, `BankPanelMessage:SelectTab` (no index) for the stash tabs, and
+   `PanelManager:OpenPanel:BankExpansionLayout` when the stash opens. The
+   plugin sets the page exactly from `ItemTooltipEvent` (hovering a
+   shared-stash item -> `ItemInfo::sharedStashPage`), follows the arrows +/-1
+   from there, and forgets it when the stash reopens or an arrow is pressed on
+   the first/last page. Add Blank Page / Remove Current Page refuse to run
+   (toast `MsgPageUnknown`) while the page is unknown.
+
 5. **No dynamic widget text.** `WidgetService` has `getInputText` (reads
    `InputTextBoxWidget` content) and `setWidgetVisible`/`setWidgetEnabled`,
    but no "set widget text" call. There is therefore no supported way to
@@ -1049,6 +1063,41 @@ here for review, same as the algorithm-level scope note below.
   `LoadConfig()`, fixed to use `try`/`catch` around `toml::parse()`). A live-
   game pass through all five buttons per "Known gaps" #6 and #7 above is
   still the next required step.
+
+## Buttons inside the shared-stash dialog (`tools/patch_mod_stash_layout.py`)
+
+The plugin no longer attaches a button strip to the inventory panel. Its three
+buttons -- **Auto Sort** (sort icon), **Add Page** (+) and **Remove Page** (-)
+-- live in the shared-stash dialog itself. The SDK can only attach plugin UI to
+`StockPanel::PlayerInventory`, and a plugin companion MPQ may not override
+native layouts, but the active mod's own MPQ can, so
+`tools/patch_mod_stash_layout.py` inserts a 3-button strip into the mod's
+`data/global/ui/layouts/bankexpansionlayouthd.json`, inside
+`BankExpansionLayout > basicstash_container > SharedStashTabContainer`, on the
+dark strip left of the native "Page N / 200" navigation. That container is only
+shown on the Shared tab, so the buttons hide on the other stash tabs by
+themselves. Each button fires `PanelManager:TogglePanel:remote-stash-sorting/Action*`.
+
+The button art is this plugin's own: 72x72 icon sprites (4 frames: normal,
+hovered, pressed, disabled -- the native page-arrow order) plus half-size
+`.lowend` copies, in the companion MPQ at
+`data/hd/global/ui/d2rloader/remote-stash-sorting/stash_btn_*.sprite`.
+`tools/gen_stash_button_sprites.py <out dir> [--png]` regenerates them
+(Pillow; writes native `SpA1` sprites, `--png` also writes previews).
+
+```text
+python tools/patch_mod_stash_layout.py <game>/mods/Reimagined/Reimagined.mpq            # patch / upgrade (no-op if current)
+python tools/patch_mod_stash_layout.py <game>/mods/Reimagined/Reimagined.mpq --check    # exit 0 current, 2 not patched / older strip
+python tools/patch_mod_stash_layout.py <game>/mods/Reimagined/Reimagined.mpq --remove   # take it out again
+```
+
+Every write first copies the file to `.bak`, `.bak1`, `.bak2`, ... (first free
+name; backups are never overwritten), and the result is re-parsed as JSON and
+checked before it is written. The strip carries a version marker
+(`RemoteStashSortingStashButtons_v<N>`), so an older strip is replaced in place.
+Re-run it after each mod update, since the mod's installer replaces the layout
+file. `--controller` also patches `controller/bankexpansionlayouthd.json` (off
+by default: the buttons need a mouse anyway).
 
 ## Building, the local `deploy/` folder, and Releases
 
