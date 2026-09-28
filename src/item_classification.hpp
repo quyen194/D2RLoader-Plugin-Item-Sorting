@@ -18,7 +18,7 @@
 #include <optional>
 #include <string>
 
-namespace RemoteStashSorting::Classification {
+namespace Quyen194ItemSorting::Classification {
 
 struct Facts {
 	GearSlot    gearSlot     = GearSlot::None;

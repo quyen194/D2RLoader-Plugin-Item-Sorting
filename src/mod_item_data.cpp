@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace RemoteStashSorting::Classification::ModData {
+namespace Quyen194ItemSorting::Classification::ModData {
 
 namespace {
 

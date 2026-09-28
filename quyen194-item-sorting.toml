@@ -1,9 +1,9 @@
-# Default configuration for the Remote Stash Sorting plugin.
-# D2RLoader creates <scope>/d2rloader/config/remote-stash-sorting.toml from
+# Default configuration for the Quyen194 Item Sorting plugin.
+# D2RLoader creates <scope>/d2rloader/config/quyen194-item-sorting.toml from
 # this file the first time the plugin loads; it never overwrites a config
 # you've already edited.
 
-[remote-stash-sorting]
+[quyen194-item-sorting]
 enabled = true
 
 # The SDK has no way to query how many active shared-stash tabs you have, so
@@ -75,7 +75,7 @@ mod_data_path = ""
 # Auto Sort re-reads this whole file from disk every time you run it, EXCEPT
 # for three settings that only take effect at plugin load time and therefore
 # need a game restart to pick up a change: `enabled`, `debug_log_ui_messages`,
-# and [remote-stash-sorting.grid] below. Every other setting in this file --
+# and [quyen194-item-sorting.grid] below. Every other setting in this file --
 # shared_stash_tab_count, start_tab, blank_tabs_at_start,
 # compact_empty_tabs_first, add_empty_page_when, mod_data_path, and the
 # entire [[layout]] list including each entry's min_tabs /
@@ -86,7 +86,7 @@ mod_data_path = ""
 # the game's shared stash; only override this if live testing finds a
 # mismatch for your game version. Needs a game restart to take effect --
 # see the reload note above.
-[remote-stash-sorting.grid]
+[quyen194-item-sorting.grid]
 width = 16
 height = 13
 
@@ -169,56 +169,56 @@ height = 13
 #                            Bolts, stays right after xbow -- unless you
 #                            explicitly split them apart in your own list.)
 
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "uniqueGear"
 min_tabs = 5
 add_empty_page_when = "never"
 gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "knif", "blun", "scep", "wand", "staf", "orb", "spea", "pole", "jave", "bow", "bowq", "xbow", "xboq", "h2h", "weap"]
 sort_keys = ["handTier", "gearGroup", "quality", "reqLevel", "-ilvl", "name"]
 
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "uniqueRingAmu"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["quality", "reqLevel", "-ilvl", "name"]
 
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "rareRingAmu"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["reqLevel", "-ilvl", "name"]
 
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "magicRingAmu"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["reqLevel", "-ilvl", "name"]
 
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "uniqueCharm"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["-size", "quality", "reqLevel", "-ilvl", "name"]
 
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "magicCharm"
 min_tabs = 2
 add_empty_page_when = "never"
 sort_keys = ["-size", "reqLevel", "-ilvl", "name"]
 
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "uniqueJewel"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["quality", "reqLevel", "-ilvl", "name"]
 
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "rareMagicJewel"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["reqLevel", "-ilvl", "name"]
 
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "set"
 min_tabs = 6
 # Always add a breathing page after Set gear -- its tabs tend to fill
@@ -226,7 +226,7 @@ min_tabs = 6
 add_empty_page_when = "always"
 sort_keys = ["setName", "reqLevel", "-ilvl", "itemName"]
 
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "rareGear"
 min_tabs = 1
 # Never add a breathing page after Rare gear -- with the quality-tier gear
@@ -240,7 +240,7 @@ sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
 # helm/weapon/etc had no dedicated category and fell all the way through to
 # "unclassified" below; now it gets its own tab(s) like every other quality
 # tier already had.
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "magicGear"
 min_tabs = 1
 add_empty_page_when = "never"
@@ -248,7 +248,7 @@ gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "k
 sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
 
 # NEW -- Superior-quality gear (same idea as magicGear above, one tier down).
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "superiorGear"
 min_tabs = 1
 add_empty_page_when = "never"
@@ -256,7 +256,7 @@ gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "k
 sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
 
 # NEW -- Normal/white-quality gear (same idea, the plain base-item tier).
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "normalGear"
 min_tabs = 1
 add_empty_page_when = "never"
@@ -268,7 +268,7 @@ sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
 # entirely, and anything this plugin doesn't classify at all (quest items,
 # keys, potions, etc). Placed last so it never steals tabs from a real
 # category ahead of it.
-[[remote-stash-sorting.layout]]
+[[quyen194-item-sorting.layout]]
 mode_id = "unclassified"
 min_tabs = 1
 add_empty_page_when = "never"

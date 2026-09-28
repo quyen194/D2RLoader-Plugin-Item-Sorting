@@ -1,4 +1,4 @@
-// Remote Stash Sorting -- D2RLoader plugin entry point.
+// Quyen194 Item Sorting -- D2RLoader plugin entry point.
 //
 // Wires the pure algorithm in sort_engine.hpp/.cpp to the official
 // D2RLoader Plugin SDK: no native_hook / InstallInlineHook / mutations.h
@@ -41,8 +41,8 @@ namespace {
 constexpr PluginInfo kPluginInfo {
 	.infoSize    = PluginInfoSize,
 	.abiVersion  = D2RL_PLUGIN_ABI_VERSION,
-	.id          = RemoteStashSorting::UiLayouts::kPluginId,
-	.name        = "Remote Stash Sorting",
+	.id          = Quyen194ItemSorting::UiLayouts::kPluginId,
+	.name        = "Quyen194 Item Sorting",
 	.version     = "0.1.0",
 	.author      = "quyen19492",
 	.description = "Auto-sorts the shared stash and rotates blank tabs.",
@@ -101,7 +101,7 @@ struct Config {
 	uint32_t                                    gridWidth  = 16;
 	uint32_t                                    gridHeight = 13;
 	uint32_t                                    tabCount   = 20;
-	std::vector<RemoteStashSorting::CategorySpec> layout;
+	std::vector<Quyen194ItemSorting::CategorySpec> layout;
 	// Debug aid for the "Known gaps" #6/#7 live-layout work: when true, every
 	// incoming UiMessageEvent (ours and every other plugin's/D2R's own) is
 	// logged as target/command, so the exact native message D2R fires when
@@ -118,7 +118,7 @@ struct Config {
 	uint32_t                                    startTab              = 0;
 	uint32_t                                    blankTabsAtStart      = 3;
 	bool                                        compactEmptyTabsFirst = true;
-	RemoteStashSorting::EmptyPageRule           addEmptyPageWhen      = RemoteStashSorting::EmptyPageRule::AtPercent(30.0);
+	Quyen194ItemSorting::EmptyPageRule           addEmptyPageWhen      = Quyen194ItemSorting::EmptyPageRule::AtPercent(30.0);
 
 	// Empty (the default) means "use the embedded, build-time-generated
 	// item_classification_data.hpp table". Non-empty is a mod folder (e.g.
@@ -138,24 +138,24 @@ Config g_config;
 // node is absent or its value doesn't parse, so callers can tell "not set,
 // inherit the global/default setting" apart from "set to an invalid value".
 template <typename Node>
-bool TryParseEmptyPageRule(toml::node_view<Node> node, RemoteStashSorting::EmptyPageRule* outRule) {
+bool TryParseEmptyPageRule(toml::node_view<Node> node, Quyen194ItemSorting::EmptyPageRule* outRule) {
 	if (!node) {
 		return false;
 	}
 	if (const auto* s = node.as_string()) {
 		if (s->get() == "never") {
-			*outRule = RemoteStashSorting::EmptyPageRule::Never();
+			*outRule = Quyen194ItemSorting::EmptyPageRule::Never();
 			return true;
 		}
 		if (s->get() == "always") {
-			*outRule = RemoteStashSorting::EmptyPageRule::AtPercent(0.0);
+			*outRule = Quyen194ItemSorting::EmptyPageRule::AtPercent(0.0);
 			return true;
 		}
 		return false;
 	}
 	if (auto d = node.template value<double>()) {
 		if (*d >= 0.0 && *d <= 100.0) {
-			*outRule = RemoteStashSorting::EmptyPageRule::AtPercent(*d);
+			*outRule = Quyen194ItemSorting::EmptyPageRule::AtPercent(*d);
 			return true;
 		}
 	}
@@ -183,7 +183,7 @@ std::vector<std::string> ParseStringArray(toml::node_view<Node> node) {
 
 Config LoadConfig(const PluginContext* ctx) {
 	Config cfg;
-	cfg.layout = RemoteStashSorting::DefaultLayout();
+	cfg.layout = Quyen194ItemSorting::DefaultLayout();
 	if (ctx == nullptr) {
 		return cfg;
 	}
@@ -191,11 +191,11 @@ Config LoadConfig(const PluginContext* ctx) {
 	std::vector<char> buffer(16 * 1024, '\0');
 	uint32_t          required = 0;
 	if (!ctx->ReadConfig(buffer.data(), static_cast<uint32_t>(buffer.size()), &required)) {
-		ctx->LogWarn("remote-stash-sorting: could not read remote-stash-sorting.toml; using built-in defaults.");
+		ctx->LogWarn("quyen194-item-sorting: could not read quyen194-item-sorting.toml; using built-in defaults.");
 		return cfg;
 	}
 	if (required > buffer.size()) {
-		ctx->LogWarn("remote-stash-sorting: config file is larger than expected; using built-in defaults.");
+		ctx->LogWarn("quyen194-item-sorting: config file is larger than expected; using built-in defaults.");
 		return cfg;
 	}
 
@@ -213,12 +213,12 @@ Config LoadConfig(const PluginContext* ctx) {
 	try {
 		parsed = toml::parse(text);
 	} catch (const toml::parse_error& err) {
-		const std::string msg = std::string("remote-stash-sorting: config parse error: ") + std::string(err.description());
+		const std::string msg = std::string("quyen194-item-sorting: config parse error: ") + std::string(err.description());
 		ctx->LogWarn(msg.c_str());
 		return cfg;
 	}
 
-	auto section = parsed["remote-stash-sorting"];
+	auto section = parsed["quyen194-item-sorting"];
 	cfg.enabled            = section["enabled"].value_or(true);
 	cfg.tabCount           = section["shared_stash_tab_count"].value_or(20u);
 	cfg.gridWidth          = section["grid"]["width"].value_or(16u);
@@ -230,18 +230,18 @@ Config LoadConfig(const PluginContext* ctx) {
 	cfg.compactEmptyTabsFirst = section["compact_empty_tabs_first"].value_or(true);
 	{
 		auto node = section["add_empty_page_when"];
-		RemoteStashSorting::EmptyPageRule rule;
+		Quyen194ItemSorting::EmptyPageRule rule;
 		if (TryParseEmptyPageRule(node, &rule)) {
 			cfg.addEmptyPageWhen = rule;
 		} else if (node) {
 			ctx->LogWarn(
-				"remote-stash-sorting: add_empty_page_when must be \"never\", \"always\", or a number 0-100; using the built-in "
+				"quyen194-item-sorting: add_empty_page_when must be \"never\", \"always\", or a number 0-100; using the built-in "
 				"default (30).");
 		}
 	}
 
 	if (auto layoutArr = section["layout"].as_array()) {
-		std::vector<RemoteStashSorting::CategorySpec> parsedLayout;
+		std::vector<Quyen194ItemSorting::CategorySpec> parsedLayout;
 		bool                                           allKnown = true;
 		for (auto&& node : *layoutArr) {
 			const auto* row = node.as_table();
@@ -250,25 +250,25 @@ Config LoadConfig(const PluginContext* ctx) {
 			}
 			std::string modeId  = (*row)["mode_id"].value_or(std::string {});
 			uint32_t    minTabs = (*row)["min_tabs"].value_or(0u);
-			if (modeId.empty() || !RemoteStashSorting::IsKnownModeId(modeId)) {
+			if (modeId.empty() || !Quyen194ItemSorting::IsKnownModeId(modeId)) {
 				allKnown = false;
 				break;
 			}
 
-			RemoteStashSorting::CategorySpec spec;
+			Quyen194ItemSorting::CategorySpec spec;
 			spec.id         = modeId;
 			spec.minTabs    = minTabs;
 			spec.sortKeys   = ParseStringArray((*row)["sort_keys"]);
 			spec.gearGroups = ParseStringArray((*row)["gear_groups"]);
 
 			auto                               overrideNode = (*row)["add_empty_page_when"];
-			RemoteStashSorting::EmptyPageRule catRule;
+			Quyen194ItemSorting::EmptyPageRule catRule;
 			if (TryParseEmptyPageRule(overrideNode, &catRule)) {
 				spec.hasEmptyPageOverride = true;
 				spec.emptyPageOverride    = catRule;
 			} else if (overrideNode) {
 				ctx->LogWarn(
-					("remote-stash-sorting: [[layout]] entry '" + modeId
+					("quyen194-item-sorting: [[layout]] entry '" + modeId
 					 + "' has an invalid add_empty_page_when; inheriting the global setting.")
 						.c_str());
 			}
@@ -278,7 +278,7 @@ Config LoadConfig(const PluginContext* ctx) {
 		if (allKnown && !parsedLayout.empty()) {
 			cfg.layout = std::move(parsedLayout);
 		} else if (!allKnown) {
-			ctx->LogWarn("remote-stash-sorting: config has an unknown mode_id in [[layout]]; using the built-in default layout instead.");
+			ctx->LogWarn("quyen194-item-sorting: config has an unknown mode_id in [[layout]]; using the built-in default layout instead.");
 		}
 	}
 
@@ -292,12 +292,12 @@ Config LoadConfig(const PluginContext* ctx) {
 	// hot-reload philosophy -- the txt files involved are a few hundred KB
 	// total, not a per-frame cost.
 	if (cfg.modDataPath.empty()) {
-		RemoteStashSorting::Classification::UseEmbeddedTable();
+		Quyen194ItemSorting::Classification::UseEmbeddedTable();
 	} else {
 		std::string loadError;
-		if (!RemoteStashSorting::Classification::LoadFromModFolder(cfg.modDataPath, &loadError)) {
+		if (!Quyen194ItemSorting::Classification::LoadFromModFolder(cfg.modDataPath, &loadError)) {
 			ctx->LogWarn(
-				("remote-stash-sorting: mod_data_path is set to '" + cfg.modDataPath + "' but could not be used (" + loadError
+				("quyen194-item-sorting: mod_data_path is set to '" + cfg.modDataPath + "' but could not be used (" + loadError
 				 + "); falling back to the embedded classification table.")
 					.c_str());
 			// LoadFromModFolder already reverted to the embedded table on failure.
@@ -325,7 +325,7 @@ std::string UnpackItemCode(uint32_t packedCode) {
 }
 
 struct EnumState {
-	std::vector<RemoteStashSorting::ItemFacts> facts;
+	std::vector<Quyen194ItemSorting::ItemFacts> facts;
 
 	// Classification coverage diagnostic (README "Known gaps" -- the
 	// generated item_classification_data.hpp table is only as good as its
@@ -347,7 +347,7 @@ auto __cdecl CollectSharedStashItem(const PluginContext* ctx, const Items::ItemI
 		return Inventory::IterationAction::Continue;
 	}
 
-	RemoteStashSorting::ItemFacts fact;
+	Quyen194ItemSorting::ItemFacts fact;
 	fact.handle          = item->handle;
 	fact.code            = item->code;
 	fact.quality         = static_cast<uint32_t>(item->quality);
@@ -357,7 +357,7 @@ auto __cdecl CollectSharedStashItem(const PluginContext* ctx, const Items::ItemI
 	fact.y               = item->y;
 
 	uint32_t baseLevelReq = 0;
-	if (auto cls = RemoteStashSorting::Classification::Classify(item->code)) {
+	if (auto cls = Quyen194ItemSorting::Classification::Classify(item->code)) {
 		fact.w           = cls->width;
 		fact.h           = cls->height;
 		fact.isGear       = cls->isGear;
@@ -385,11 +385,11 @@ auto __cdecl CollectSharedStashItem(const PluginContext* ctx, const Items::ItemI
 	// jewel/amulet category, regardless of quality or roll -- ties were
 	// silently decided by whatever key came next (usually "-ilvl"), with no
 	// relationship at all to the item's own displayed "Required Level".
-	fact.sortLevel = RemoteStashSorting::Classification::TrueReqLevel(fact.quality, item->qualityRecordId, item->prefixIds, item->suffixIds, baseLevelReq);
+	fact.sortLevel = Quyen194ItemSorting::Classification::TrueReqLevel(fact.quality, item->qualityRecordId, item->prefixIds, item->suffixIds, baseLevelReq);
 
 	if (item->quality == Items::Quality::Set) {
 		fact.setId        = item->qualityRecordId;
-		fact.setGroupName = RemoteStashSorting::Classification::SetGroupForRow(item->qualityRecordId);
+		fact.setGroupName = Quyen194ItemSorting::Classification::SetGroupForRow(item->qualityRecordId);
 
 		// Diagnostic for a live report: a specific set item (a Grim Helm,
 		// qualityRecordId pointing at "Natalya's Odium") never got moved by
@@ -414,7 +414,7 @@ auto __cdecl CollectSharedStashItem(const PluginContext* ctx, const Items::ItemI
 			char msg[224];
 			std::snprintf(
 				msg, sizeof(msg),
-				"remote-stash-sorting: set item handle %llu (code='%s') has qualityRecordId=%d, which "
+				"quyen194-item-sorting: set item handle %llu (code='%s') has qualityRecordId=%d, which "
 				"could not be mapped to a set name; Auto Sort will leave it exactly where it is (see "
 				"README Known gaps #3).",
 				static_cast<unsigned long long>(item->handle), UnpackItemCode(item->code).c_str(), item->qualityRecordId);
@@ -464,7 +464,7 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 		std::snprintf(
 			buf,
 			sizeof(buf),
-			"remote-stash-sorting: shared-stash scan: %zu item(s) across %zu distinct tab number(s) [%s]. If this "
+			"quyen194-item-sorting: shared-stash scan: %zu item(s) across %zu distinct tab number(s) [%s]. If this "
 			"stays the SAME single tab number no matter which tab is open in-game when you click a button, "
 			"forEachInventoryItem is only returning the currently open tab, not every tab (see README Known gaps #8).",
 			state->facts.size(),
@@ -496,7 +496,7 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 		std::snprintf(
 			classBuf,
 			sizeof(classBuf),
-			"remote-stash-sorting: item classification: %zu matched, %zu unmatched (defaults used -- excluded from "
+			"quyen194-item-sorting: item classification: %zu matched, %zu unmatched (defaults used -- excluded from "
 			"every category) out of %zu scanned. Sample unmatched codes: [%s]",
 			state->classifiedCount,
 			state->unclassifiedCount,
@@ -524,8 +524,8 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 // it too.)
 
 auto ApplyMoves(
-	const PluginContext* ctx, PlayerHandle player, const RemoteStashSorting::SequencedMoves& sequenced,
-	const std::vector<RemoteStashSorting::ItemFacts>& items, uint32_t* committedCount) -> Items::Result {
+	const PluginContext* ctx, PlayerHandle player, const Quyen194ItemSorting::SequencedMoves& sequenced,
+	const std::vector<Quyen194ItemSorting::ItemFacts>& items, uint32_t* committedCount) -> Items::Result {
 	if (committedCount != nullptr) {
 		*committedCount = 0;
 	}
@@ -536,12 +536,12 @@ auto ApplyMoves(
 
 	// Handle -> facts, purely for the rejection log below (what code/category
 	// was this?) -- never consulted for planning, which already happened.
-	std::unordered_map<uint64_t, const RemoteStashSorting::ItemFacts*> factsByHandle;
+	std::unordered_map<uint64_t, const Quyen194ItemSorting::ItemFacts*> factsByHandle;
 	factsByHandle.reserve(items.size());
 	for (const auto& it : items) factsByHandle.emplace(it.handle, &it);
 
 	for (const auto& note : sequenced.diagnostics) {
-		const std::string msg = "remote-stash-sorting: move ordering: " + note;
+		const std::string msg = "quyen194-item-sorting: move ordering: " + note;
 		ctx->LogWarn(msg.c_str());
 	}
 
@@ -629,10 +629,10 @@ auto ApplyMoves(
 					category = "gear(slot=" + std::to_string(static_cast<int>(fact->gearSlot)) + ")";
 				} else {
 					switch (fact->nonGearKind) {
-						case RemoteStashSorting::NonGearKind::Charm: category = "charm"; break;
-						case RemoteStashSorting::NonGearKind::Jewel: category = "jewel"; break;
-						case RemoteStashSorting::NonGearKind::Ring: category = "ring"; break;
-						case RemoteStashSorting::NonGearKind::Amulet: category = "amulet"; break;
+						case Quyen194ItemSorting::NonGearKind::Charm: category = "charm"; break;
+						case Quyen194ItemSorting::NonGearKind::Jewel: category = "jewel"; break;
+						case Quyen194ItemSorting::NonGearKind::Ring: category = "ring"; break;
+						case Quyen194ItemSorting::NonGearKind::Amulet: category = "amulet"; break;
 						default: category = "unclassified(misc/gem/rune/quest/potion)"; break;
 					}
 				}
@@ -650,7 +650,7 @@ auto ApplyMoves(
 			char msg[512];
 			std::snprintf(
 				msg, sizeof(msg),
-				"remote-stash-sorting: move for item handle %llu (code='%s', %s) -> tab %u (%u,%u) was rejected (result "
+				"quyen194-item-sorting: move for item handle %llu (code='%s', %s) -> tab %u (%u,%u) was rejected (result "
 				"%u); skipping just this item, the rest of the plan is unaffected.%s",
 				static_cast<unsigned long long>(op.item), codeText.c_str(), category.c_str(), op.move.destination.sharedStashPage,
 				op.move.destination.x, op.move.destination.y, static_cast<unsigned>(txnResult),
@@ -672,7 +672,7 @@ auto ApplyMoves(
 		const size_t layerEnd = layerOffset + layerSize;
 		if (!loggedChunkWarning && layerSize > Items::MaxExistingItemOperations) {
 			ctx->LogWarn(
-				"remote-stash-sorting: a single dependency layer exceeds 4096 operations; it will be sent in several "
+				"quyen194-item-sorting: a single dependency layer exceeds 4096 operations; it will be sent in several "
 				"transactions and is NOT atomic across all of them (see README).");
 			loggedChunkWarning = true;
 		}
@@ -693,8 +693,8 @@ auto ApplyMoves(
 
 // --- Toast -------------------------------------------------------------
 
-void ShowToast(const PluginContext* ctx, RemoteStashSorting::UiLayouts::OutcomeMessage message) {
-	namespace UiLayouts = RemoteStashSorting::UiLayouts;
+void ShowToast(const PluginContext* ctx, Quyen194ItemSorting::UiLayouts::OutcomeMessage message) {
+	namespace UiLayouts = Quyen194ItemSorting::UiLayouts;
 	if (ctx == nullptr || g_panels == nullptr || g_widgets == nullptr) {
 		return;
 	}
@@ -703,7 +703,7 @@ void ShowToast(const PluginContext* ctx, RemoteStashSorting::UiLayouts::OutcomeM
 	}
 
 	Widgets::WidgetHandle panelWidget = Widgets::InvalidHandle;
-	if (g_widgets->findPanel(ctx, "remote-stash-sorting/Toast", &panelWidget) != Widgets::Result::Success) {
+	if (g_widgets->findPanel(ctx, "quyen194-item-sorting/Toast", &panelWidget) != Widgets::Result::Success) {
 		return;
 	}
 
@@ -735,7 +735,7 @@ void ShowToast(const PluginContext* ctx, RemoteStashSorting::UiLayouts::OutcomeM
 }
 
 struct ToastRequest {
-	RemoteStashSorting::UiLayouts::OutcomeMessage message;
+	Quyen194ItemSorting::UiLayouts::OutcomeMessage message;
 };
 
 void __cdecl ShowToastOnUiThread(const PluginContext* ctx, void* userData) noexcept {
@@ -749,7 +749,7 @@ void __cdecl ShowToastOnUiThread(const PluginContext* ctx, void* userData) noexc
 // Queues the toast for the UI thread. Use this from a game-thread callback;
 // call ShowToast(...) directly when already on the UI thread (the
 // UiMessageListener callback below is UI-thread already).
-void QueueToast(const PluginContext* ctx, RemoteStashSorting::UiLayouts::OutcomeMessage message) {
+void QueueToast(const PluginContext* ctx, Quyen194ItemSorting::UiLayouts::OutcomeMessage message) {
 	auto* req = new (std::nothrow) ToastRequest { message };
 	if (req == nullptr) {
 		return;
@@ -762,7 +762,7 @@ void QueueToast(const PluginContext* ctx, RemoteStashSorting::UiLayouts::Outcome
 // --- Button actions (run on the game thread) --------------------------
 
 void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
-	namespace UiLayouts = RemoteStashSorting::UiLayouts;
+	namespace UiLayouts = Quyen194ItemSorting::UiLayouts;
 
 	// Hot-reload: re-read the config file fresh on every Auto Sort run and
 	// take every setting except the three that only take effect at plugin
@@ -783,19 +783,19 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 
 	PlayerHandle player = InvalidPlayerHandle;
 	if (g_inventory->getLocalPlayer(ctx, &player) != Inventory::Result::Success) {
-		ctx->LogWarn("remote-stash-sorting: auto sort needs an authoritative local player.");
+		ctx->LogWarn("quyen194-item-sorting: auto sort needs an authoritative local player.");
 		QueueToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		return;
 	}
 
 	EnumState state;
 	if (!CollectSharedStash(ctx, player, &state)) {
-		ctx->LogWarn("remote-stash-sorting: could not enumerate the shared stash.");
+		ctx->LogWarn("quyen194-item-sorting: could not enumerate the shared stash.");
 		QueueToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		return;
 	}
 
-	RemoteStashSorting::AutoSortConfig sortCfg;
+	Quyen194ItemSorting::AutoSortConfig sortCfg;
 	sortCfg.layout                = g_config.layout;
 	sortCfg.tabCount              = g_config.tabCount;
 	sortCfg.gridWidth             = g_config.gridWidth;
@@ -805,9 +805,9 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 	sortCfg.compactEmptyTabsFirst = g_config.compactEmptyTabsFirst;
 	sortCfg.addEmptyPageWhen      = g_config.addEmptyPageWhen;
 
-	const auto outcome = RemoteStashSorting::RunAutoSortWithPadding(state.facts, sortCfg);
+	const auto outcome = Quyen194ItemSorting::RunAutoSortWithPadding(state.facts, sortCfg);
 	if (!outcome.ok) {
-		const std::string logMsg = "remote-stash-sorting: auto sort failed: " + outcome.error;
+		const std::string logMsg = "quyen194-item-sorting: auto sort failed: " + outcome.error;
 		ctx->LogWarn(logMsg.c_str());
 
 		UiLayouts::OutcomeMessage msg = UiLayouts::OutcomeMessage::InternalError;
@@ -828,7 +828,7 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 	// items landed there) so a "weird" in-game result can be checked against
 	// what RunAutoSort actually planned, without guessing.
 	for (const auto& line : outcome.categoryLog) {
-		const std::string msg = "remote-stash-sorting: plan: " + line;
+		const std::string msg = "quyen194-item-sorting: plan: " + line;
 		ctx->LogInfo(msg.c_str());
 	}
 
@@ -836,7 +836,7 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 		char padMsg[256];
 		std::snprintf(
 			padMsg, sizeof(padMsg),
-			"remote-stash-sorting: compacted %u item(s) to relabel empty tabs to the end; added %u breathing page(s); pulled %u/%u "
+			"quyen194-item-sorting: compacted %u item(s) to relabel empty tabs to the end; added %u breathing page(s); pulled %u/%u "
 			"blank tab(s) to the front.",
 			outcome.compactMoveCount, outcome.breathingTabsAdded, outcome.blankTabsAtStartAdded, g_config.blankTabsAtStart);
 		ctx->LogInfo(padMsg);
@@ -847,19 +847,19 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 	// planning-side bug (RunAutoSort / item classification data) from an
 	// application-side one (ApplyMoves / the live transaction) when the
 	// in-game result looks wrong -- see README "Known gaps".
-	const auto collisions = RemoteStashSorting::DetectCollisions(state.facts, outcome.moves, g_config.gridWidth, g_config.gridHeight);
+	const auto collisions = Quyen194ItemSorting::DetectCollisions(state.facts, outcome.moves, g_config.gridWidth, g_config.gridHeight);
 	if (!collisions.empty()) {
 		char summary[192];
 		std::snprintf(
-			summary, sizeof(summary), "remote-stash-sorting: plan self-check found %zu colliding move(s) (showing up to 20):",
+			summary, sizeof(summary), "quyen194-item-sorting: plan self-check found %zu colliding move(s) (showing up to 20):",
 			collisions.size());
 		ctx->LogWarn(summary);
 		for (const auto& line : collisions) {
-			const std::string msg = "remote-stash-sorting: " + line;
+			const std::string msg = "quyen194-item-sorting: " + line;
 			ctx->LogWarn(msg.c_str());
 		}
 	} else {
-		ctx->LogInfo("remote-stash-sorting: plan self-check found no colliding moves.");
+		ctx->LogInfo("quyen194-item-sorting: plan self-check found no colliding moves.");
 	}
 
 	// The plan above only guarantees a collision-free FINAL layout -- it says
@@ -879,7 +879,7 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 	// comment) -- rather than the bare `tabCount` padding above the real
 	// stash size, which a live report traced a cluster of Unsupported
 	// rejections back to.
-	const auto sequenced = RemoteStashSorting::SequenceMovesForLiveApply(
+	const auto sequenced = Quyen194ItemSorting::SequenceMovesForLiveApply(
 		state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight, outcome.tabsUsed);
 
 	uint32_t   committed = 0;
@@ -889,7 +889,7 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 	std::snprintf(
 		logMsg,
 		sizeof(logMsg),
-		"remote-stash-sorting: auto sort placed %u item(s) across %u tab(s); committed %u/%zu move op(s) (transaction result %u).",
+		"quyen194-item-sorting: auto sort placed %u item(s) across %u tab(s); committed %u/%zu move op(s) (transaction result %u).",
 		outcome.itemsSorted,
 		outcome.tabsUsed,
 		committed,
@@ -909,7 +909,7 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 }
 
 void __cdecl DoAddBlankPage(const PluginContext* ctx, void*) noexcept {
-	namespace UiLayouts = RemoteStashSorting::UiLayouts;
+	namespace UiLayouts = Quyen194ItemSorting::UiLayouts;
 
 	PlayerHandle player = InvalidPlayerHandle;
 	if (g_inventory->getLocalPlayer(ctx, &player) != Inventory::Result::Success) {
@@ -923,9 +923,9 @@ void __cdecl DoAddBlankPage(const PluginContext* ctx, void*) noexcept {
 		return;
 	}
 
-	const auto outcome = RemoteStashSorting::MoveBlankTabAfter(state.facts, g_selectedTab.load(), g_config.tabCount);
+	const auto outcome = Quyen194ItemSorting::MoveBlankTabAfter(state.facts, g_selectedTab.load(), g_config.tabCount);
 	if (!outcome.ok) {
-		const std::string logMsg = "remote-stash-sorting: add blank page after page " + std::to_string(g_selectedTab.load() + 1) + " failed: " + outcome.error;
+		const std::string logMsg = "quyen194-item-sorting: add blank page after page " + std::to_string(g_selectedTab.load() + 1) + " failed: " + outcome.error;
 		ctx->LogWarn(logMsg.c_str());
 		QueueToast(ctx, UiLayouts::OutcomeMessage::NoBlankTab);
 		return;
@@ -936,7 +936,7 @@ void __cdecl DoAddBlankPage(const PluginContext* ctx, void*) noexcept {
 	// "destination still occupied by another in-plan item" issue can apply
 	// here too, just at tab granularity instead of per-cell.
 	const auto sequenced =
-		RemoteStashSorting::SequenceMovesForLiveApply(state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight);
+		Quyen194ItemSorting::SequenceMovesForLiveApply(state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight);
 
 	uint32_t   committed = 0;
 	const auto txnResult = ApplyMoves(ctx, player, sequenced, state.facts, &committed);
@@ -950,7 +950,7 @@ void __cdecl DoAddBlankPage(const PluginContext* ctx, void*) noexcept {
 	}
 	{
 		char buf[200];
-		std::snprintf(buf, sizeof(buf), "remote-stash-sorting: add blank page after page %u: blank is now page %u; committed %u/%zu move(s).",
+		std::snprintf(buf, sizeof(buf), "quyen194-item-sorting: add blank page after page %u: blank is now page %u; committed %u/%zu move(s).",
 		               g_selectedTab.load() + 1, outcome.blankTab + 1, committed, sequenced.moves.size());
 		ctx->LogInfo(buf);
 	}
@@ -958,7 +958,7 @@ void __cdecl DoAddBlankPage(const PluginContext* ctx, void*) noexcept {
 }
 
 void __cdecl DoRemoveCurrentPage(const PluginContext* ctx, void*) noexcept {
-	namespace UiLayouts = RemoteStashSorting::UiLayouts;
+	namespace UiLayouts = Quyen194ItemSorting::UiLayouts;
 
 	PlayerHandle player = InvalidPlayerHandle;
 	if (g_inventory->getLocalPlayer(ctx, &player) != Inventory::Result::Success) {
@@ -972,9 +972,9 @@ void __cdecl DoRemoveCurrentPage(const PluginContext* ctx, void*) noexcept {
 		return;
 	}
 
-	const auto outcome = RemoteStashSorting::PushBlankTabToEnd(state.facts, g_selectedTab.load(), g_config.tabCount);
+	const auto outcome = Quyen194ItemSorting::PushBlankTabToEnd(state.facts, g_selectedTab.load(), g_config.tabCount);
 	if (!outcome.ok) {
-		const std::string logMsg = "remote-stash-sorting: remove page " + std::to_string(g_selectedTab.load() + 1) + " failed: " + outcome.error;
+		const std::string logMsg = "quyen194-item-sorting: remove page " + std::to_string(g_selectedTab.load() + 1) + " failed: " + outcome.error;
 		ctx->LogWarn(logMsg.c_str());
 		const auto msg = outcome.error.find("out of range") != std::string::npos ? UiLayouts::OutcomeMessage::OutOfRange : UiLayouts::OutcomeMessage::CurrentNotEmpty;
 		QueueToast(ctx, msg);
@@ -983,7 +983,7 @@ void __cdecl DoRemoveCurrentPage(const PluginContext* ctx, void*) noexcept {
 
 	// See DoAutoSort's own comment on SequenceMovesForLiveApply.
 	const auto sequenced =
-		RemoteStashSorting::SequenceMovesForLiveApply(state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight);
+		Quyen194ItemSorting::SequenceMovesForLiveApply(state.facts, outcome.moves, g_config.tabCount, g_config.gridWidth, g_config.gridHeight);
 
 	uint32_t   committed = 0;
 	const auto txnResult = ApplyMoves(ctx, player, sequenced, state.facts, &committed);
@@ -997,7 +997,7 @@ void __cdecl DoRemoveCurrentPage(const PluginContext* ctx, void*) noexcept {
 	}
 	{
 		char buf[200];
-		std::snprintf(buf, sizeof(buf), "remote-stash-sorting: removed empty page %u (moved to the end); committed %u/%zu move(s).",
+		std::snprintf(buf, sizeof(buf), "quyen194-item-sorting: removed empty page %u (moved to the end); committed %u/%zu move(s).",
 		               g_selectedTab.load() + 1, committed, sequenced.moves.size());
 		ctx->LogInfo(buf);
 	}
@@ -1014,7 +1014,7 @@ void SetTrackedPage(const PluginContext* ctx, uint32_t page, const char* reason)
 	g_selectedTabKnown.store(true);
 	if (ctx != nullptr && (!wasKnown || previous != page)) {
 		char buf[200];
-		std::snprintf(buf, sizeof(buf), "remote-stash-sorting: on-screen shared page is now %u (%s).", page + 1, reason);
+		std::snprintf(buf, sizeof(buf), "quyen194-item-sorting: on-screen shared page is now %u (%s).", page + 1, reason);
 		ctx->LogInfo(buf);
 	}
 }
@@ -1024,7 +1024,7 @@ void MarkPageUnknown(const PluginContext* ctx, const char* reason) {
 		return;
 	}
 	if (ctx != nullptr) {
-		const std::string msg = std::string("remote-stash-sorting: on-screen shared page is unknown until an item on it is hovered (") + reason + ").";
+		const std::string msg = std::string("quyen194-item-sorting: on-screen shared page is unknown until an item on it is hovered (") + reason + ").";
 		ctx->LogInfo(msg.c_str());
 	}
 }
@@ -1075,7 +1075,7 @@ void __cdecl OnItemTooltip(const PluginContext* ctx, SharedEvents::ItemTooltipEv
 // --- UI message listener (button clicks) --------------------------------
 
 auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessageEvent* event, void*) noexcept -> SharedEvents::UiMessageAction {
-	namespace UiLayouts = RemoteStashSorting::UiLayouts;
+	namespace UiLayouts = Quyen194ItemSorting::UiLayouts;
 
 	if (ctx == nullptr || event == nullptr || event->structSize < SharedEvents::UiMessageEventRequiredSize) {
 		return SharedEvents::UiMessageAction::Continue;
@@ -1089,7 +1089,7 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 	// Off by default; this fires on essentially every UI click in the game.
 	if (g_config.debugLogUiMessages) {
 		char buf[256];
-		std::snprintf(buf, sizeof(buf), "remote-stash-sorting: debug: UiMessage target=\"%s\" command=\"%s\" text=\"%s\"",
+		std::snprintf(buf, sizeof(buf), "quyen194-item-sorting: debug: UiMessage target=\"%s\" command=\"%s\" text=\"%s\"",
 		               event->target != nullptr ? event->target : "(null)",
 		               event->command != nullptr ? event->command : "(null)",
 		               event->text != nullptr ? event->text : "(null)");
@@ -1117,9 +1117,9 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 		Panels::RegistrationHandle handle;
 	};
 	const ActionBinding bindings[] = {
-		{ "remote-stash-sorting/ActionAutoSort", g_actionAutoSortPanel },
-		{ "remote-stash-sorting/ActionAddBlankPage", g_actionAddBlankPagePanel },
-		{ "remote-stash-sorting/ActionRemoveCurrentPage", g_actionRemoveCurrentPagePanel },
+		{ "quyen194-item-sorting/ActionAutoSort", g_actionAutoSortPanel },
+		{ "quyen194-item-sorting/ActionAddBlankPage", g_actionAddBlankPagePanel },
+		{ "quyen194-item-sorting/ActionRemoveCurrentPage", g_actionRemoveCurrentPagePanel },
 	};
 	const ActionBinding* matched = nullptr;
 	for (const ActionBinding& binding : bindings) {
@@ -1140,22 +1140,22 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 		(void)g_panels->closePanel(ctx, matched->handle);
 	}
 
-	if (std::strcmp(matched->logicalName, "remote-stash-sorting/ActionAutoSort") == 0) {
+	if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionAutoSort") == 0) {
 		if (!g_config.enabled) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::AutoSortDisabled);
 		} else if (g_threads->runOnGameThread(ctx, DoAutoSort, nullptr) != Threads::Result::Success) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		}
-	} else if ((std::strcmp(matched->logicalName, "remote-stash-sorting/ActionAddBlankPage") == 0
-				   || std::strcmp(matched->logicalName, "remote-stash-sorting/ActionRemoveCurrentPage") == 0)
+	} else if ((std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionAddBlankPage") == 0
+				   || std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionRemoveCurrentPage") == 0)
 			   && !g_selectedTabKnown.load()) {
-		ctx->LogInfo("remote-stash-sorting: page action skipped -- the on-screen shared page is unknown (hover an item on it first).");
+		ctx->LogInfo("quyen194-item-sorting: page action skipped -- the on-screen shared page is unknown (hover an item on it first).");
 		ShowToast(ctx, UiLayouts::OutcomeMessage::PageUnknown);
-	} else if (std::strcmp(matched->logicalName, "remote-stash-sorting/ActionAddBlankPage") == 0) {
+	} else if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionAddBlankPage") == 0) {
 		if (g_threads->runOnGameThread(ctx, DoAddBlankPage, nullptr) != Threads::Result::Success) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		}
-	} else if (std::strcmp(matched->logicalName, "remote-stash-sorting/ActionRemoveCurrentPage") == 0) {
+	} else if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionRemoveCurrentPage") == 0) {
 		if (g_threads->runOnGameThread(ctx, DoRemoveCurrentPage, nullptr) != Threads::Result::Success) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		}
@@ -1171,42 +1171,42 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderGetPluginInfo() noexcept -> const PluginInfo* {
 }
 
 D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexcept -> bool {
-	namespace UiLayouts = RemoteStashSorting::UiLayouts;
+	namespace UiLayouts = Quyen194ItemSorting::UiLayouts;
 
 	if (context == nullptr) {
 		return false;
 	}
 
 	if (context->QueryService(&g_inventory) != ServiceQueryResult::Success || !HasInventoryServiceField(g_inventory, InventoryServiceRequiredSize)) {
-		context->LogError("remote-stash-sorting: InventoryService is unavailable.");
+		context->LogError("quyen194-item-sorting: InventoryService is unavailable.");
 		return false;
 	}
 	if (context->QueryService(&g_items) != ServiceQueryResult::Success || !HasItemServiceField(g_items, ItemServiceRequiredSize)) {
-		context->LogError("remote-stash-sorting: ItemService is unavailable.");
+		context->LogError("quyen194-item-sorting: ItemService is unavailable.");
 		return false;
 	}
 	if (!HasItemServiceCapability(g_items, Items::ItemServiceCapability::SharedStashWrite)) {
-		context->LogError("remote-stash-sorting: this D2RLoader build does not support shared-stash item writes (needs ItemServiceCapability::SharedStashWrite).");
+		context->LogError("quyen194-item-sorting: this D2RLoader build does not support shared-stash item writes (needs ItemServiceCapability::SharedStashWrite).");
 		return false;
 	}
 	if (context->QueryService(&g_threads) != ServiceQueryResult::Success || !HasThreadServiceField(g_threads, ThreadServiceRequiredSize)) {
-		context->LogError("remote-stash-sorting: ThreadService is unavailable.");
+		context->LogError("quyen194-item-sorting: ThreadService is unavailable.");
 		return false;
 	}
 	if (context->QueryService(&g_panels) != ServiceQueryResult::Success || !HasPanelServiceField(g_panels, PanelServiceRequiredSize)) {
-		context->LogError("remote-stash-sorting: PanelService is unavailable.");
+		context->LogError("quyen194-item-sorting: PanelService is unavailable.");
 		return false;
 	}
 	if (context->QueryService(&g_resources) != ServiceQueryResult::Success || !HasResourceServiceField(g_resources, ResourceServiceRequiredSize)) {
-		context->LogError("remote-stash-sorting: ResourceService is unavailable.");
+		context->LogError("quyen194-item-sorting: ResourceService is unavailable.");
 		return false;
 	}
 	if (context->QueryService(&g_widgets) != ServiceQueryResult::Success || !HasWidgetServiceField(g_widgets, WidgetServiceRequiredSize)) {
-		context->LogError("remote-stash-sorting: WidgetService is unavailable.");
+		context->LogError("quyen194-item-sorting: WidgetService is unavailable.");
 		return false;
 	}
 	if (context->QueryService(&g_sharedEvents) != ServiceQueryResult::Success || !HasSharedEventServiceField(g_sharedEvents, SharedEventServiceRequiredSize)) {
-		context->LogError("remote-stash-sorting: SharedEventService is unavailable.");
+		context->LogError("quyen194-item-sorting: SharedEventService is unavailable.");
 		return false;
 	}
 
@@ -1216,13 +1216,13 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 	const std::string toastJson = UiLayouts::BuildToastLayoutJson();
 	const Resources::ResourceRegistration toastResource {
 		.structSize = Resources::ResourceRegistrationSize,
-		.path       = "data/global/ui/layouts/remote-stash-sorting/Toasthd.json",
+		.path       = "data/global/ui/layouts/quyen194-item-sorting/Toasthd.json",
 		.bytes      = toastJson.data(),
 		.byteCount  = toastJson.size(),
 	};
 	Resources::RegistrationHandle toastResourceHandle = Resources::InvalidHandle;
 	if (g_resources->registerResource(context, &toastResource, &toastResourceHandle) != Resources::Result::Success) {
-		context->LogError("remote-stash-sorting: could not register the toast layout resource.");
+		context->LogError("quyen194-item-sorting: could not register the toast layout resource.");
 		return false;
 	}
 
@@ -1232,13 +1232,13 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 		.localId    = "Toast",
 	};
 	if (g_panels->registerPanel(context, &toastRegistration, &g_toastPanel) != Panels::Result::Success) {
-		context->LogError("remote-stash-sorting: could not register the toast panel.");
+		context->LogError("quyen194-item-sorting: could not register the toast panel.");
 		return false;
 	}
 
 	// Three invisible trigger panels, one per button -- see the g_action*Panel
 	// declarations near the top of this file for why. Each layout file is
-	// data/global/ui/layouts/remote-stash-sorting/Action<Name>hd.json in the
+	// data/global/ui/layouts/quyen194-item-sorting/Action<Name>hd.json in the
 	// companion mpq, a 1x1 Panel with no children.
 	struct ActionPanelSetup {
 		const char*                 localId;
@@ -1255,7 +1255,7 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 			.localId    = setup.localId,
 		};
 		if (g_panels->registerPanel(context, &registration, setup.handle) != Panels::Result::Success) {
-			context->LogError("remote-stash-sorting: could not register a button trigger panel.");
+			context->LogError("quyen194-item-sorting: could not register a button trigger panel.");
 			return false;
 		}
 	}
@@ -1265,7 +1265,7 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 		.callback   = OnUiMessage,
 	};
 	if (g_sharedEvents->registerUiMessageListener(context, &listener, &g_uiMessageListener) != SharedEvents::Result::Success) {
-		context->LogError("remote-stash-sorting: could not register the UI message listener.");
+		context->LogError("quyen194-item-sorting: could not register the UI message listener.");
 		return false;
 	}
 
@@ -1277,10 +1277,10 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 		.callback   = OnItemTooltip,
 	};
 	if (g_sharedEvents->registerItemTooltipListener(context, &tooltipListener, &g_tooltipListener) != SharedEvents::Result::Success) {
-		context->LogWarn("remote-stash-sorting: could not register the item tooltip listener; the on-screen page can only be set with the page arrows / plugin buttons.");
+		context->LogWarn("quyen194-item-sorting: could not register the item tooltip listener; the on-screen page can only be set with the page arrows / plugin buttons.");
 	}
 
-	context->LogInfo("remote-stash-sorting: loaded.");
+	context->LogInfo("quyen194-item-sorting: loaded.");
 	return true;
 }
 

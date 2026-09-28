@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-namespace RemoteStashSorting::Classification {
+namespace Quyen194ItemSorting::Classification {
 
 namespace {
 // Set by LoadFromModFolder/UseEmbeddedTable. std::nullopt means "answer from

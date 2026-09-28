@@ -4,7 +4,7 @@ build-*/
 out/
 
 # The "ready to copy into <game>/d2rloader" folder that CMakeLists.txt
-# regenerates on every build (see the RSS_DEPLOY_* custom command). Not
+# regenerates on every build (see the QIS_DEPLOY_* custom command). Not
 # committed -- CI rebuilds and zips it fresh for each Release.
 deploy/
 

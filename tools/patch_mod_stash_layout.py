@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add the Remote Stash Sorting buttons to a mod's shared-stash dialog.
+"""Add the Quyen194 Item Sorting buttons to a mod's shared-stash dialog.
 
 The D2RLoader PluginSDK can only attach a plugin child layout to
 StockPanel::PlayerInventory, and a plugin's companion MPQ may not override
@@ -11,8 +11,8 @@ container is only shown while the Shared tab is selected, so the buttons hide
 themselves on the Personal / Gems / Materials / Runes tabs.
 
 The buttons are icon sprites shipped in the plugin's companion MPQ
-(d2rloader/remote-stash-sorting/stash_btn_*.sprite). Each button fires
-"PanelManager:TogglePanel:remote-stash-sorting/Action<Name>", which the plugin
+(d2rloader/quyen194-item-sorting/stash_btn_*.sprite). Each button fires
+"PanelManager:TogglePanel:quyen194-item-sorting/Action<Name>", which the plugin
 turns into the matching action (see the g_action*Panel comment in plugin.cpp).
 
 Usage:
@@ -40,8 +40,13 @@ import shutil
 import sys
 from pathlib import Path
 
-STRIP_VERSION = 2
-MARKER_PREFIX = "RemoteStashSortingStashButtons_v"
+STRIP_VERSION = 3
+MARKER_PREFIX = "Quyen194ItemSortingStashButtons_v"
+# Strips written before the plugin was renamed from remote-stash-sorting to
+# quyen194-item-sorting (strip v1/v2). Still recognised so they get upgraded
+# or removed instead of being left behind next to a new strip.
+LEGACY_MARKER_PREFIXES = ("Remote" + "StashSortingStashButtons_v",)
+ALL_MARKER_PREFIXES = (MARKER_PREFIX,) + LEGACY_MARKER_PREFIXES
 MARKER = f"{MARKER_PREFIX}{STRIP_VERSION}"
 
 LAYOUT_FILES = {
@@ -55,12 +60,12 @@ LAYOUT_FILES = {
 # Coordinates are BankExpansionLayout-local, same space as StashNavigation.
 # Sprites ship in the plugin's companion MPQ (tools/gen_stash_button_sprites.py);
 # frame order matches the native page arrows: normal, hovered, pressed, disabled.
-SPRITE_DIR = "d2rloader/remote-stash-sorting"
+SPRITE_DIR = "d2rloader/quyen194-item-sorting"
 BUTTONS = [
     # (widget name, sprite, tooltip key, action panel)
-    ("RssAutoSortButton", "stash_btn_autosort", "AutoSortTooltip", "ActionAutoSort"),
-    ("RssAddBlankPageButton", "stash_btn_addpage", "AddBlankPageTooltip", "ActionAddBlankPage"),
-    ("RssRemovePageButton", "stash_btn_removepage", "RemoveCurrentPageTooltip", "ActionRemoveCurrentPage"),
+    ("QisAutoSortButton", "stash_btn_autosort", "AutoSortTooltip", "ActionAutoSort"),
+    ("QisAddBlankPageButton", "stash_btn_addpage", "AddBlankPageTooltip", "ActionAddBlankPage"),
+    ("QisRemovePageButton", "stash_btn_removepage", "RemoveCurrentPageTooltip", "ActionRemoveCurrentPage"),
 ]
 BUTTON_SIZE, BUTTON_GAP = 72, 10
 STRIP_X, STRIP_Y = 110, 1516
@@ -91,8 +96,8 @@ def build_block(indent: str, nl: str) -> str:
             f'{i4}"hoveredFrame": 1,',
             f'{i4}"pressedFrame": 2,',
             f'{i4}"disabledFrame": 3,',
-            f'{i4}"tooltipString": "@remote-stash-sorting:{tooltip}",',
-            f'{i4}"onClickMessage": "PanelManager:TogglePanel:remote-stash-sorting/{action}"',
+            f'{i4}"tooltipString": "@quyen194-item-sorting:{tooltip}",',
+            f'{i4}"onClickMessage": "PanelManager:TogglePanel:quyen194-item-sorting/{action}"',
             f"{i3}}}",
             f"{i2}}}" + ("," if idx < len(BUTTONS) - 1 else ""),
         ]
@@ -156,7 +161,8 @@ def enclosing_object_start(text: str, pos: int) -> int:
 
 
 def find_existing_strip(text: str):
-    m = re.search(r'"name"\s*:\s*"' + re.escape(MARKER_PREFIX) + r'(\d+)"', text)
+    alternatives = "|".join(re.escape(p) for p in ALL_MARKER_PREFIXES)
+    m = re.search(r'"name"\s*:\s*"(?:' + alternatives + r')(\d+)"', text)
     if not m:
         return None
     start = enclosing_object_start(text, m.start())
@@ -228,7 +234,9 @@ def validate(text: str, expect_patched: bool) -> None:
     names = [c.get("name") for c in container.get("children", [])]
     if expect_patched and MARKER not in names:
         raise ValueError("validation: strip did not land inside SharedStashTabContainer")
-    if not expect_patched and any(str(n).startswith(MARKER_PREFIX) for n in names):
+    if any(str(n).startswith(ALL_MARKER_PREFIXES) and n != MARKER for n in names):
+        raise ValueError("validation: an older strip is still present")
+    if not expect_patched and any(str(n).startswith(ALL_MARKER_PREFIXES) for n in names):
         raise ValueError("validation: strip still present after removal")
     if find_widget(doc, "StashNavigation") is None:
         raise ValueError("validation: native StashNavigation disappeared")

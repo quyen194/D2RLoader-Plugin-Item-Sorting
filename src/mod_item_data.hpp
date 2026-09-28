@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-namespace RemoteStashSorting::Classification::ModData {
+namespace Quyen194ItemSorting::Classification::ModData {
 
 struct LoadedTable {
 	// Sorted ascending by `code`, same invariant as the embedded kTable, so

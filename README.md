@@ -1,4 +1,4 @@
-# Remote Stash Sorting
+# Quyen194 Item Sorting
 
 A D2RLoader plugin that ports the shared-stash **auto-sort**, **add blank
 page**, and **remove current page** features from
@@ -9,6 +9,18 @@ SDK](../PluginSDK) services. **It does not use `native_hook` /
 here (reading items, moving items, adding UI, catching button clicks) goes
 through an officially supported service call. See "Why no native hooks"
 below for why that constraint shaped several design decisions.
+
+> **Renamed.** This plugin used to be `remote-stash-sorting`
+> (`d2rl-remote-stash-sorting.dll` / `.mpq`, `remote-stash-sorting.toml`). It is
+> now plugin id **`quyen194-item-sorting`**: `d2rl-quyen194-item-sorting.dll`,
+> companion `d2rl-quyen194-item-sorting.mpq`, config
+> `quyen194-item-sorting.toml` with its settings under `[quyen194-item-sorting]`,
+> and strings under the `@quyen194-item-sorting:` namespace. When upgrading an
+> install, delete the old `d2rl-remote-stash-sorting.dll`, `.mpq` folder and
+> `.toml` from `<game>/d2rloader/plugins/` (otherwise both load), carry your
+> settings over into the new `.toml`, and re-run
+> `tools/patch_mod_stash_layout.py` so the mod's stash layout points at the new
+> id (it recognises and replaces the old strip).
 
 ## Status
 
@@ -31,7 +43,7 @@ first.
 
 - **Auto Sort** button: runs the ported auto-sort algorithm (same
   category/quota layout as the save-editor) against the whole shared stash,
-  configurable via `remote-stash-sorting.toml`.
+  configurable via `quyen194-item-sorting.toml`.
 - **Add Blank Page** button: moves the nearest empty tab after the plugin's
   tracked "selected tab" pointer to sit immediately after it (a pure
   tab-content rotation via item moves, not real tab creation -- the SDK has
@@ -75,7 +87,7 @@ tools/
                                  refresh the table (e.g. after a new D2R
                                  season changes item data) -- not part of the
                                  normal build.
-remote-stash-sorting.toml       Default config, embedded into the DLL via
+quyen194-item-sorting.toml       Default config, embedded into the DLL via
                                  d2rlplugin_embed_config() and copied out by
                                  D2RLoader on first load.
 ```
@@ -108,19 +120,19 @@ gaps").
 
 ### UI message protocol
 
-The button strip's `onClickMessage` fields send `"remote-stash-sorting:<Command>"`
+The button strip's `onClickMessage` fields send `"quyen194-item-sorting:<Command>"`
 (the D2R convention seen in the SDK docs and examples, e.g.
 `"PanelManager:TogglePanel:<panel>"`). `plugin.cpp` registers one
 `SharedEventService::UiMessageListener` that matches `target ==
-"remote-stash-sorting"` and dispatches on `command`: `AutoSort`,
+"quyen194-item-sorting"` and dispatches on `command`: `AutoSort`,
 `AddBlankPage`, `RemoveCurrentPage`, `SelectPrevTab`, `SelectNextTab`. The
 toast's Close button instead sends D2RCore's own built-in
-`"PanelManager:ClosePanel:remote-stash-sorting/Toast"` message, so it needs
+`"PanelManager:ClosePanel:quyen194-item-sorting/Toast"` message, so it needs
 no plugin-side handler at all.
 
-## Config (`remote-stash-sorting.toml`)
+## Config (`quyen194-item-sorting.toml`)
 
-D2RLoader creates `<scope>/d2rloader/config/remote-stash-sorting.toml` from
+D2RLoader creates `<scope>/d2rloader/config/quyen194-item-sorting.toml` from
 the embedded default the first time the plugin loads, and never overwrites
 a config you've already edited. See the file's own comments for the full
 reference; the two settings you're most likely to need to change:
@@ -195,7 +207,7 @@ here for review, same as the algorithm-level scope note below.
    equivalent), and `blank_tabs_at_start` (pull that many empty tabs to
    the front of the active range after everything else is placed,
    mirroring `_ssAddBlankTabsAtStart`). See "Config" above and
-   `remote-stash-sorting.toml`'s comments for the exact settings.
+   `quyen194-item-sorting.toml`'s comments for the exact settings.
    Deliberately **not** ported: the save-editor's pass-1 quota-shortfall
    redistribution (its `padding: roundRobin|inOrder|off` setting, which
    hands an empty category's unused `min_tabs` quota to others *after* the
@@ -585,12 +597,12 @@ here for review, same as the algorithm-level scope note below.
    `button_mold.sprite` and `charminvbutton.sprite` from the working
    `d2rl-charm-inv` plugin (its own small button attached to the edge of
    `PlayerInventory`) into a companion resource folder,
-   `d2rl-remote-stash-sorting.mpq/data/hd/global/ui/d2rloader/remote-stash-sorting/`,
+   `d2rl-quyen194-item-sorting.mpq/data/hd/global/ui/d2rloader/quyen194-item-sorting/`,
    structured exactly like `d2rl-charm-inv.mpq` itself (PluginSDK README
    "Resources and Companion MPQs": "D2RCore looks beside each plugin DLL for
    `d2rl-<plugin-id>.mpq`" -- a folder during development, a packed MPQ for
    release). Matching that convention required renaming the built DLL from
-   `RemoteStashSorting.dll` to `d2rl-remote-stash-sorting.dll` (see
+   `Quyen194ItemSorting.dll` to `d2rl-quyen194-item-sorting.dll` (see
    `CMakeLists.txt`'s `OUTPUT_NAME`); **if you already have the old-named DLL
    in `<game>/d2rloader/plugins/`, delete it** so the plugin doesn't load
    twice under two different filenames. D2RCore discovers the companion
@@ -618,7 +630,7 @@ here for review, same as the algorithm-level scope note below.
    references, fixed tooltips) -- unlike the toast panel, which genuinely
    needs to be built at runtime for its enumerated per-outcome/per-tab
    widgets -- there was no reason to keep it in code. It is now a real file:
-   `d2rl-remote-stash-sorting.mpq/data/global/ui/layouts/remote-stash-sorting/StashToolshd.json`,
+   `d2rl-quyen194-item-sorting.mpq/data/global/ui/layouts/quyen194-item-sorting/StashToolshd.json`,
    matching `data/global/ui/layouts/<plugin-id>/<local-id>hd.json` (the
    exact convention the PluginSDK README documents and `d2rl-charm-inv.mpq`
    itself uses). `plugin.cpp` no longer calls `registerResource` for it at
@@ -626,20 +638,20 @@ here for review, same as the algorithm-level scope note below.
    is enough; D2RCore resolves the file from the companion `.mpq` on its
    own, the same way it already resolved the sprites. Every button's
    `tooltipString` also stopped being a hardcoded English literal and now
-   references a string-table key, e.g. `"@remote-stash-sorting:AutoSortTooltip"`,
+   references a string-table key, e.g. `"@quyen194-item-sorting:AutoSortTooltip"`,
    defined in a new
-   `d2rl-remote-stash-sorting.mpq/data/local/lng/strings/d2rloader/remote-stash-sorting/strings.json`
+   `d2rl-quyen194-item-sorting.mpq/data/local/lng/strings/d2rloader/quyen194-item-sorting/strings.json`
    (confirmed supported on `tooltipString`, not just `TextBoxWidget` `text`,
    by `d2rl-charm-inv`'s own `CloseButton`: `"tooltipString": "@d2r:strClose"`).
    The toast panel's 14 outcome messages (`ui_layouts.hpp`'s
    `OutcomeMessage`) moved the same way -- `BuildToastLayoutJson()` still
    builds the panel JSON at runtime (still registered via
    `registerResource`, since the *set* of visible widgets is still dynamic),
-   but each message's `text` is now `"@remote-stash-sorting:MsgAutoSortOk"`
+   but each message's `text` is now `"@quyen194-item-sorting:MsgAutoSortOk"`
    etc. instead of an embedded English sentence, resolved against the same
    `strings.json`. Net effect: every piece of *content* this plugin
    currently shows the player -- coordinates, sprite filenames, tooltip
-   text, and toast wording -- now lives in `d2rl-remote-stash-sorting.mpq/`
+   text, and toast wording -- now lives in `d2rl-quyen194-item-sorting.mpq/`
    as editable JSON, not baked into the DLL; only genuinely dynamic
    structure (which toast widgets are visible, which tab number is shown)
    still goes through C++. `strings.json` currently only has an `enUS` entry
@@ -654,7 +666,7 @@ here for review, same as the algorithm-level scope note below.
    (5 icons visible in the expected spot, confirmed by screenshot), but
    clicking any of the 5 buttons produced no effect at all -- not even
    `LogButtonStripRects`' unconditional debug log line, which only fires
-   once `OnUiMessage` sees an event with `target == "remote-stash-sorting"`.
+   once `OnUiMessage` sees an event with `target == "quyen194-item-sorting"`.
    15k+ lines of `debug_log_ui_messages` firehose from that test session
    contained zero such lines, meaning the click never reached our
    `ButtonWidget`s at all -- not a downstream logic bug. Leading suspect:
@@ -678,7 +690,7 @@ here for review, same as the algorithm-level scope note below.
    are *after* the fix, ruling out "stale build" as an explanation. A fresh
    `debug_log_ui_messages` firehose taken right after clicking still shows the
    `LeftMouseButtonDown`/`LeftMouseButtonUp` pair but no
-   `target="remote-stash-sorting"` line anywhere near it -- so widening the
+   `target="quyen194-item-sorting"` line anywhere near it -- so widening the
    root rect did not fix it; that hypothesis is falsified. New data point from
    the user: the clicked button *does* visibly go to its pressed frame
    (`hoveredFrame`/press art), meaning the `ButtonWidget` itself is receiving
@@ -693,7 +705,7 @@ here for review, same as the algorithm-level scope note below.
      needing a working click first.
    - A self-test (`RunSelfTestDispatch`) is queued via `runOnUiThread` right
      after the listener registers: it calls
-     `WidgetService::dispatchUiAction` with `target="remote-stash-sorting"`,
+     `WidgetService::dispatchUiAction` with `target="quyen194-item-sorting"`,
      `command="SelfTest"` -- the exact same broadcast shape a real button
      click is documented to use (PluginSDK README, "Existing Widgets":
      "send a normal target/command/text action"). If the log shows
@@ -728,10 +740,10 @@ here for review, same as the algorithm-level scope note below.
    plugin's per-plugin log) turned up the real cause first. Right around the
    point the `PlayerInventory` panel is built, it logs three native
    assertions from `D2UI\src\TypeDesc.cpp`, all about the literal string
-   `"remote-stash-sorting"`: `BC_ASSERT: hashValue != m_hashValues.end()`
-   ("Given key not found", `valueName = "remote-stash-sorting"`),
+   `"quyen194-item-sorting"`: `BC_ASSERT: hashValue != m_hashValues.end()`
+   ("Given key not found", `valueName = "quyen194-item-sorting"`),
    `BC_ASSERT: channel.IsValid()`, and `BC_ASSERT: false` ("Missing message
-   value list registration for %s", `buf = "remote-stash-sorting"`).
+   value list registration for %s", `buf = "quyen194-item-sorting"`).
    Assertion dialogs are disabled, so D2R just logs and silently continues
    -- no crash, no visible error, nothing in this plugin's own log, nothing
    in the `debug_log_ui_messages` firehose either, because the failure
@@ -740,18 +752,18 @@ here for review, same as the algorithm-level scope note below.
    against a native, closed registry of "message channels" (`TypeDesc`'s
    "message value list") when the JSON layout is parsed -- built-in names
    like `PanelManager`, `InputMessage`, `MonsterHealth` are pre-registered;
-   an arbitrary plugin id like `"remote-stash-sorting"` is not, and never
+   an arbitrary plugin id like `"quyen194-item-sorting"` is not, and never
    becomes a registered channel just by calling
    `SharedEventService::registerUiMessageListener` (that only makes the
    plugin a listener for messages that get broadcast -- it does not
    register the plugin's own id as a valid broadcast target). So every one
    of the five buttons' `onClickMessage` values
-   (`"remote-stash-sorting:AutoSort"` etc.) failed this native validation
+   (`"quyen194-item-sorting:AutoSort"` etc.) failed this native validation
    silently, every single time, and the click was dropped before it could
    ever produce a `UiMessageEvent` -- fully explaining both symptoms at
    once: the button still shows its native pressed frame (purely a local,
    cursor-driven visual, unrelated to `onClickMessage`), and no
-   `target="remote-stash-sorting"` line, and no click-triggered
+   `target="quyen194-item-sorting"` line, and no click-triggered
    `LogButtonStripRects` output, ever appeared in any log, at any rect,
    with or without the root-rect fix.
 
@@ -760,13 +772,13 @@ here for review, same as the algorithm-level scope note below.
    own button already works: `"PanelManager:TogglePanel:charm-inv/CharmInvPanel"`),
    and `PanelService` exposes `openPanel`/`closePanel`/`togglePanel` as
    direct C++ calls too. So each button now targets
-   `"PanelManager:TogglePanel:remote-stash-sorting/Action<Name>"` against
+   `"PanelManager:TogglePanel:quyen194-item-sorting/Action<Name>"` against
    one dedicated, invisible (`1x1`, no children) trigger panel per action --
    five new panels (`ActionAutoSort`, `ActionAddBlankPage`,
    `ActionRemoveCurrentPage`, `ActionPrevTab`, `ActionNextTab`), registered
    in `D2RLoaderLoadPlugin` alongside the existing `Toast` panel, with
    layout files
-   `d2rl-remote-stash-sorting.mpq/data/global/ui/layouts/remote-stash-sorting/Action<Name>hd.json`.
+   `d2rl-quyen194-item-sorting.mpq/data/global/ui/layouts/quyen194-item-sorting/Action<Name>hd.json`.
    `OnUiMessage` now matches `target == "PanelManager"` and
    `command == "TogglePanel"`, looks up `text` (the toggled panel's own
    logical name) against the five trigger panels to find which button
@@ -1076,12 +1088,12 @@ native layouts, but the active mod's own MPQ can, so
 `BankExpansionLayout > basicstash_container > SharedStashTabContainer`, on the
 dark strip left of the native "Page N / 200" navigation. That container is only
 shown on the Shared tab, so the buttons hide on the other stash tabs by
-themselves. Each button fires `PanelManager:TogglePanel:remote-stash-sorting/Action*`.
+themselves. Each button fires `PanelManager:TogglePanel:quyen194-item-sorting/Action*`.
 
 The button art is this plugin's own: 72x72 icon sprites (4 frames: normal,
 hovered, pressed, disabled -- the native page-arrow order) plus half-size
 `.lowend` copies, in the companion MPQ at
-`data/hd/global/ui/d2rloader/remote-stash-sorting/stash_btn_*.sprite`.
+`data/hd/global/ui/d2rloader/quyen194-item-sorting/stash_btn_*.sprite`.
 `tools/gen_stash_button_sprites.py <out dir> [--png]` regenerates them
 (Pillow; writes native `SpA1` sprites, `--png` also writes previews).
 
@@ -1094,7 +1106,7 @@ python tools/patch_mod_stash_layout.py <game>/mods/Reimagined/Reimagined.mpq --r
 Every write first copies the file to `.bak`, `.bak1`, `.bak2`, ... (first free
 name; backups are never overwritten), and the result is re-parsed as JSON and
 checked before it is written. The strip carries a version marker
-(`RemoteStashSortingStashButtons_v<N>`), so an older strip is replaced in place.
+(`Quyen194ItemSortingStashButtons_v<N>`), so an older strip is replaced in place.
 Re-run it after each mod update, since the mod's installer replaces the layout
 file. `--controller` also patches `controller/bankexpansionlayouthd.json` (off
 by default: the buttons need a mouse anyway).
@@ -1110,13 +1122,13 @@ name). In VS Code's CMake Tools: select an MSVC kit, set
 `"cmake.generator": "Ninja"` in settings, pick the Release variant, build.
 
 **Local deploy folder:** every build (any config, VS Code or the command
-line) copies the freshly built DLL -- named `d2rl-remote-stash-sorting.dll`,
-not the CMake target's default `RemoteStashSorting.dll` (see
+line) copies the freshly built DLL -- named `d2rl-quyen194-item-sorting.dll`,
+not the CMake target's default `Quyen194ItemSorting.dll` (see
 `OUTPUT_NAME` in `CMakeLists.txt`; required so D2RCore's
 "`d2rl-<plugin-id>.mpq` beside the DLL" lookup finds the companion folder
-below) -- plus its companion `d2rl-remote-stash-sorting.mpq/` resource
+below) -- plus its companion `d2rl-quyen194-item-sorting.mpq/` resource
 folder (the sprites from "Known gaps" #6) into `deploy/d2rloader/plugins/`
-(see the `RSS_DEPLOY_PLUGINS_DIR` custom commands in `CMakeLists.txt`). The
+(see the `QIS_DEPLOY_PLUGINS_DIR` custom commands in `CMakeLists.txt`). The
 whole `deploy/d2rloader` folder can be dragged straight into `<game>/`.
 `deploy/` is gitignored -- it is regenerated by every build, not committed.
 Optionally set `-DD2RLOADER_GAME_DIR=<path to your D2R install>` (e.g. in a
@@ -1124,7 +1136,7 @@ local, gitignored `CMakeUserPresets.json`) to also have every build copy the
 DLL and its companion folder directly into
 `<D2RLOADER_GAME_DIR>/d2rloader/plugins/` for live testing, no manual copy
 step needed. **If you built this plugin before the DLL rename, delete the
-old `RemoteStashSorting.dll` from your `<game>/d2rloader/plugins/`** so it
+old `Quyen194ItemSorting.dll` from your `<game>/d2rloader/plugins/`** so it
 doesn't load twice under two different filenames.
 
 **GitHub Releases:** `.github/workflows/release.yml` builds Release/x64 and
@@ -1138,7 +1150,7 @@ git push origin v0.1.0
 
 The workflow checks out this repo and
 [`D2RLoader/PluginSDK`](https://github.com/D2RLoader/PluginSDK) as sibling
-folders (matching the local `D2RLoader-Plugins-Dev/{Remote-Stash-Sorting,
+folders (matching the local `D2RLoader-Plugins-Dev/{Quyen194-Item-Sorting,
 PluginSDK}` layout `CMakeLists.txt` expects), builds with the same
 Ninja + MSVC combination as above, then zips the resulting
 `deploy/d2rloader` folder as-is and attaches it to the Release -- so the

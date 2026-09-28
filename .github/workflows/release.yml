@@ -1,4 +1,4 @@
-# Builds d2rl-remote-stash-sorting.dll (Release, x64) and publishes a GitHub
+# Builds d2rl-quyen194-item-sorting.dll (Release, x64) and publishes a GitHub
 # Release
 # whenever a version tag is pushed, e.g.:
 #   git tag v0.1.0
@@ -21,12 +21,12 @@ jobs:
     runs-on: windows-latest
     steps:
       # Checked out as a sibling of PluginSDK below, mirroring the local
-      # D2RLoader-Plugins-Dev/{Remote-Stash-Sorting,PluginSDK} layout that
+      # D2RLoader-Plugins-Dev/{Quyen194-Item-Sorting,PluginSDK} layout that
       # CMakeLists.txt's `../PluginSDK` add_subdirectory() expects.
-      - name: Checkout Remote-Stash-Sorting
+      - name: Checkout Quyen194-Item-Sorting
         uses: actions/checkout@v4
         with:
-          path: Remote-Stash-Sorting
+          path: Quyen194-Item-Sorting
 
       - name: Checkout PluginSDK
         uses: actions/checkout@v4
@@ -40,26 +40,26 @@ jobs:
           arch: x64
 
       - name: Configure
-        working-directory: Remote-Stash-Sorting
+        working-directory: Quyen194-Item-Sorting
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        working-directory: Remote-Stash-Sorting
+        working-directory: Quyen194-Item-Sorting
         run: cmake --build build --config Release
 
       # CMakeLists.txt's post-build steps already copied
-      # d2rl-remote-stash-sorting.dll and its companion
-      # d2rl-remote-stash-sorting.mpq/ folder into deploy/d2rloader/plugins/ --
+      # d2rl-quyen194-item-sorting.dll and its companion
+      # d2rl-quyen194-item-sorting.mpq/ folder into deploy/d2rloader/plugins/ --
       # zip that folder as-is so the Release asset is literally
       # "extract into <game>/".
       - name: Package deploy/d2rloader
-        working-directory: Remote-Stash-Sorting
+        working-directory: Quyen194-Item-Sorting
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          $zipName = "RemoteStashSorting-$tag.zip"
+          $zipName = "Quyen194ItemSorting-$tag.zip"
           Compress-Archive -Path "deploy/d2rloader" -DestinationPath $zipName
-          echo "ZIP_PATH=Remote-Stash-Sorting/$zipName" >> $env:GITHUB_ENV
+          echo "ZIP_PATH=Quyen194-Item-Sorting/$zipName" >> $env:GITHUB_ENV
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
