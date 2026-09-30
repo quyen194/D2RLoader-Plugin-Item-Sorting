@@ -106,6 +106,19 @@ std::atomic<uint32_t> g_selectedTab { 0 };
 //     again until the next hover, since D2R may not reopen on the same page.
 // Add Blank Page / Remove Current Page refuse to run while this is false.
 std::atomic<bool> g_selectedTabKnown { false };
+
+// add_page_enabled / remove_page_enabled from the config. false hides the
+// matching button in the shared-stash strip (WidgetService::setWidgetVisible
+// on the widget the mod layout patch inserted -- the buttons live in the
+// mod's own BankExpansionLayout, not in a plugin layout, so hiding them at
+// runtime is the only way to make this a setting instead of a re-patch) and
+// also refuses the action, in case hiding failed. Re-read from the config
+// file every time the stash opens, so no game restart is needed. Atomics:
+// written on the UI thread, read on the UI thread only today, but kept
+// atomic like g_selectedTab in case an action handler ever checks them from
+// the game thread.
+std::atomic<bool> g_addPageEnabled { true };
+std::atomic<bool> g_removePageEnabled { true };
 SharedEvents::ListenerHandle g_tooltipListener = SharedEvents::InvalidHandle;
 
 struct Config {
@@ -121,6 +134,11 @@ struct Config {
 	// watching the log while toggling it in-game. Off by default -- this is
 	// a firehose, not something to leave on.
 	bool                                        debugLogUiMessages = false;
+
+	// Show + allow the shared-stash Add Page / Remove Page buttons. See
+	// g_addPageEnabled above.
+	bool                                        addPageEnabled    = true;
+	bool                                        removePageEnabled = true;
 
 	// Mirrors the save-editor's autosort.json layer (startTab,
 	// blankTabsAtStart, compactEmptyTabsFirst, addEmptyPageWhen) -- see
@@ -204,16 +222,9 @@ std::vector<std::string> ParseStringArray(toml::node_view<Node> node) {
 	return out;
 }
 
-Config LoadConfig(const PluginContext* ctx) {
-	Config cfg;
-	cfg.layout        = Quyen194ItemSorting::DefaultLayout();
-	cfg.personalStash.config = Quyen194ItemSorting::Grid::DefaultConfig("personal_stash");
-	cfg.inventory.config     = Quyen194ItemSorting::Grid::DefaultConfig("inventory");
-	cfg.cube.config          = Quyen194ItemSorting::Grid::DefaultConfig("cube");
-	if (ctx == nullptr) {
-		return cfg;
-	}
-
+// Reads the plugin's TOML config file into *out. Logs and returns false on
+// failure (callers then fall back to built-in defaults).
+bool ReadConfigText(const PluginContext* ctx, std::string* out) {
 	// The shipped file is ~32 KB since the single-grid sections were added;
 	// grow the buffer to whatever ReadConfig says it needs rather than
 	// assuming any fixed size.
@@ -226,16 +237,33 @@ Config LoadConfig(const PluginContext* ctx) {
 	}
 	if (!readOk) {
 		ctx->LogWarn("quyen194-item-sorting: could not read quyen194-item-sorting.toml; using built-in defaults.");
-		return cfg;
+		return false;
 	}
 	if (required > buffer.size()) {
 		ctx->LogWarn("quyen194-item-sorting: config file is larger than expected; using built-in defaults.");
+		return false;
+	}
+
+	out->assign(buffer.data(), buffer.data() + required);
+	while (!out->empty() && out->back() == '\0') {
+		out->pop_back();
+	}
+	return true;
+}
+
+Config LoadConfig(const PluginContext* ctx) {
+	Config cfg;
+	cfg.layout        = Quyen194ItemSorting::DefaultLayout();
+	cfg.personalStash.config = Quyen194ItemSorting::Grid::DefaultConfig("personal_stash");
+	cfg.inventory.config     = Quyen194ItemSorting::Grid::DefaultConfig("inventory");
+	cfg.cube.config          = Quyen194ItemSorting::Grid::DefaultConfig("cube");
+	if (ctx == nullptr) {
 		return cfg;
 	}
 
-	std::string text(buffer.data(), buffer.data() + required);
-	while (!text.empty() && text.back() == '\0') {
-		text.pop_back();
+	std::string text;
+	if (!ReadConfigText(ctx, &text)) {
+		return cfg;
 	}
 
 	// toml++ compiles in "exceptions" mode whenever the toolchain has C++
@@ -263,6 +291,8 @@ Config LoadConfig(const PluginContext* ctx) {
 	cfg.gridWidth          = section["grid"]["width"].value_or(16u);
 	cfg.gridHeight         = section["grid"]["height"].value_or(13u);
 	cfg.debugLogUiMessages = section["debug_log_ui_messages"].value_or(false);
+	cfg.addPageEnabled     = section["add_page_enabled"].value_or(true);
+	cfg.removePageEnabled  = section["remove_page_enabled"].value_or(true);
 
 	cfg.startTab              = section["start_tab"].value_or(0u);
 	cfg.blankTabsAtStart      = section["blank_tabs_at_start"].value_or(3u);
@@ -1371,6 +1401,112 @@ void __cdecl OnItemTooltip(const PluginContext* ctx, SharedEvents::ItemTooltipEv
 	SetTrackedPage(ctx, info.sharedStashPage, "hovered a shared-stash item");
 }
 
+// --- Add Page / Remove Page button visibility ------------------------------
+// See g_addPageEnabled near the top of this file. The two buttons are widgets
+// the layout patch (tools/patch_mod_stash_layout.py) inserted into the mod's
+// BankExpansionLayout:
+//   BankExpansionLayout/basicstash_container/SharedStashTabContainer/
+//     Quyen194ItemSortingStashButtons_v4/{QisAddBlankPageButton,QisRemovePageButton}
+// Hiding one leaves an empty slot in the strip (the SDK can't move widgets).
+
+constexpr const char* kAddPageButtonWidget    = "QisAddBlankPageButton";
+constexpr const char* kRemovePageButtonWidget = "QisRemovePageButton";
+
+// findWidget should search every descendant of the panel; if this D2RLoader
+// build only searches direct children, walk the known container chain.
+bool FindStashButton(const PluginContext* ctx, Widgets::WidgetHandle panel, const char* name, Widgets::WidgetHandle* out) {
+	if (g_widgets->findWidget(ctx, panel, name, out) == Widgets::Result::Success) {
+		return true;
+	}
+	const char* const chain[] = { "basicstash_container", "SharedStashTabContainer", "Quyen194ItemSortingStashButtons_v4" };
+	Widgets::WidgetHandle current = panel;
+	for (const char* step : chain) {
+		Widgets::WidgetHandle next = Widgets::InvalidHandle;
+		if (g_widgets->findWidget(ctx, current, step, &next) != Widgets::Result::Success) {
+			return false;
+		}
+		current = next;
+	}
+	return g_widgets->findWidget(ctx, current, name, out) == Widgets::Result::Success;
+}
+
+// Re-reads only add_page_enabled / remove_page_enabled (not the whole
+// LoadConfig, which also reloads the classification tables). UI thread.
+void RefreshPageButtonToggles(const PluginContext* ctx) {
+	std::string text;
+	if (!ReadConfigText(ctx, &text)) {
+		return;
+	}
+	toml::table parsed;
+	try {
+		parsed = toml::parse(text);
+	} catch (const toml::parse_error&) {
+		return; // keep the previous values; LoadConfig/Auto Sort log parse errors
+	}
+	auto section = parsed["quyen194-item-sorting"];
+	g_addPageEnabled.store(section["add_page_enabled"].value_or(true));
+	g_removePageEnabled.store(section["remove_page_enabled"].value_or(true));
+}
+
+void ApplyPageButtonVisibility(const PluginContext* ctx) {
+	if (ctx == nullptr || g_widgets == nullptr) {
+		return;
+	}
+	Widgets::WidgetHandle panel = Widgets::InvalidHandle;
+	if (g_widgets->findPanel(ctx, "BankExpansionLayout", &panel) != Widgets::Result::Success) {
+		return; // stash not loaded yet; the next OpenPanel retries
+	}
+
+	struct Button {
+		const char* widget;
+		bool        visible;
+	};
+	const Button buttons[] = {
+		{ kAddPageButtonWidget, g_addPageEnabled.load() },
+		{ kRemovePageButtonWidget, g_removePageEnabled.load() },
+	};
+	static std::atomic<bool> s_loggedNotFound { false };
+	for (const Button& button : buttons) {
+		Widgets::WidgetHandle w = Widgets::InvalidHandle;
+		if (!FindStashButton(ctx, panel, button.widget, &w)) {
+			// Only worth a warning when the user actually wants it hidden.
+			if (!button.visible && !s_loggedNotFound.exchange(true)) {
+				const std::string msg = std::string("quyen194-item-sorting: could not find the stash button '") + button.widget
+				                      + "' to hide it (is the mod layout patched? tools/patch_mod_stash_layout.py). The action is still disabled.";
+				ctx->LogWarn(msg.c_str());
+			}
+			continue;
+		}
+		const auto result = g_widgets->setWidgetVisible(ctx, w, button.visible);
+		if (result != Widgets::Result::Success && !button.visible) {
+			char buf[200];
+			std::snprintf(buf, sizeof(buf), "quyen194-item-sorting: hiding stash button '%s' failed (result %u).", button.widget,
+			               static_cast<unsigned>(result));
+			ctx->LogWarn(buf);
+		}
+	}
+}
+
+void __cdecl ApplyPageButtonVisibilityOnUiThread(const PluginContext* ctx, void*) noexcept {
+	ApplyPageButtonVisibility(ctx);
+}
+
+// Called for every UiMessage. The listener sees a message before the panel
+// handles it, so the widget work is queued to run after this dispatch (the
+// panel may only be created by the OpenPanel being dispatched right now).
+void TrackPageButtonVisibility(const PluginContext* ctx, const char* target, const char* command, const char* text) {
+	const bool stashOpened = std::strcmp(target, "PanelManager") == 0 && std::strcmp(command, "OpenPanel") == 0 && text != nullptr
+	                      && std::strcmp(text, "BankExpansionLayout") == 0;
+	const bool stashTabSwitched = std::strcmp(target, "BankPanelMessage") == 0 && std::strcmp(command, "SelectTab") == 0;
+	if (!stashOpened && !stashTabSwitched) {
+		return;
+	}
+	if (stashOpened) {
+		RefreshPageButtonToggles(ctx);
+	}
+	(void)g_threads->runOnUiThread(ctx, ApplyPageButtonVisibilityOnUiThread, nullptr);
+}
+
 // --- UI message listener (button clicks) --------------------------------
 
 auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessageEvent* event, void*) noexcept -> SharedEvents::UiMessageAction {
@@ -1397,6 +1533,7 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 
 	if (event->target != nullptr && event->command != nullptr) {
 		TrackStashNavigation(ctx, event->target, event->command, event->text);
+		TrackPageButtonVisibility(ctx, event->target, event->command, event->text);
 	}
 
 	if (event->target == nullptr || event->command == nullptr || event->text == nullptr) {
@@ -1469,6 +1606,10 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 		} else if (g_threads->runOnGameThread(ctx, DoAutoSort, nullptr) != Threads::Result::Success) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		}
+	} else if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionAddBlankPage") == 0 && !g_addPageEnabled.load()) {
+		ctx->LogInfo("quyen194-item-sorting: Add Page is disabled (add_page_enabled = false); ignoring the click.");
+	} else if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionRemoveCurrentPage") == 0 && !g_removePageEnabled.load()) {
+		ctx->LogInfo("quyen194-item-sorting: Remove Page is disabled (remove_page_enabled = false); ignoring the click.");
 	} else if ((std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionAddBlankPage") == 0
 				   || std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionRemoveCurrentPage") == 0)
 			   && !g_selectedTabKnown.load()) {
@@ -1534,6 +1675,8 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 	}
 
 	g_config = LoadConfig(context);
+	g_addPageEnabled.store(g_config.addPageEnabled);
+	g_removePageEnabled.store(g_config.removePageEnabled);
 
 	// Toast panel (built at runtime -- see ui_layouts.hpp).
 	const std::string toastJson = UiLayouts::BuildToastLayoutJson();

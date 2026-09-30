@@ -163,6 +163,14 @@ reference; the two settings you're most likely to need to change:
   that many tabs, so the actual cause is still open (see "Known gaps" #3).
   Until it's found, don't assume a too-high value is safe just because this
   run's cause turned out to be something else.
+- `add_page_enabled` / `remove_page_enabled` (default `true`) -- set to
+  `false` to hide the shared stash's Add Page / Remove Page button and ignore
+  that action. The buttons are widgets in the mod's patched
+  `BankExpansionLayout`, so the plugin hides them at runtime
+  (`WidgetService::setWidgetVisible`, applied after every
+  `PanelManager:OpenPanel:BankExpansionLayout` and
+  `BankPanelMessage:SelectTab`); the hidden button's slot in the row stays
+  empty. Both keys are re-read every time the stash opens -- no restart.
 - `[[layout]]` entries -- one per category, in fill order, mirroring
   `SS_AUTO_LAYOUT` from the save-editor. `mode_id` must be one of:
   `set`, `uniqueGear`, `rareGear`, `magicGear`, `superiorGear`, `normalGear`,

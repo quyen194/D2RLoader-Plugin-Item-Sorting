@@ -39,6 +39,12 @@ compact_empty_tabs_first = true
 # explanation below).
 add_empty_page_when = "never"
 
+# Shared-stash Add Page / Remove Page buttons. Set one to false to hide that
+# button in the stash (its slot in the button row stays empty) and ignore its
+# action. Re-read every time you open the stash -- no game restart needed.
+add_page_enabled = false
+remove_page_enabled = false
+
 # Notification style after Auto Sort / Add Blank Page / Remove Current Page
 # finish. The only accepted value right now is "toast", which shows the
 # plugin's own toast panel with a Close button. Exact item and tab counts
@@ -75,7 +81,8 @@ mod_data_path = ""
 # Auto Sort re-reads this whole file from disk every time you run it, EXCEPT
 # for three settings that only take effect at plugin load time and therefore
 # need a game restart to pick up a change: `enabled`, `debug_log_ui_messages`,
-# and [quyen194-item-sorting.grid] below. Every other setting in this file --
+# and [quyen194-item-sorting.grid] below. (add_page_enabled /
+# remove_page_enabled reload whenever the stash opens instead.) Every other setting in this file --
 # shared_stash_tab_count, start_tab, blank_tabs_at_start,
 # compact_empty_tabs_first, add_empty_page_when, mod_data_path, and the
 # entire [[layout]] list including each entry's min_tabs /
