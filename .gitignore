@@ -15,3 +15,6 @@ CMakeUserPresets.json
 # Visual Studio / VS Code local state
 .vs/
 *.user
+
+# Python bytecode (tools/*.py are run in place)
+__pycache__/

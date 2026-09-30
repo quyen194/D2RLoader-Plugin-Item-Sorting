@@ -1,7 +1,7 @@
 {
 	"type": "Widget", "name": "quyen194-item-sorting/InventoryTools",
 	"fields": {
-		"rect": { "x": 110, "y": 1628, "width": 88, "height": 88 }
+		"rect": { "x": 956, "y": 1640, "width": 88, "height": 88 }
 	},
 	"children": [
 		{

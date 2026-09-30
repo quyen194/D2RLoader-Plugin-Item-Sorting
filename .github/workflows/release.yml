@@ -47,22 +47,29 @@ jobs:
         working-directory: Quyen194-Item-Sorting
         run: cmake --build build --config Release
 
-      # CMakeLists.txt's post-build steps already copied
-      # d2rl-quyen194-item-sorting.dll and its companion
-      # d2rl-quyen194-item-sorting.mpq/ folder into deploy/d2rloader/plugins/ --
-      # zip that folder as-is so the Release asset is literally
-      # "extract into <game>/".
-      - name: Package deploy/d2rloader
+      # CMakeLists.txt's post-build steps already filled deploy/:
+      #   d2rloader/plugins/  d2rl-quyen194-item-sorting.dll + .mpq/ folder
+      #   d2rloader/config/   quyen194-item-sorting.toml
+      #   README.md           install guide (packaging/README.md)
+      #   patch_mod_stash_layout.py
+      # Zip deploy/'s contents as-is: the d2rloader folder goes into <game>/,
+      # the README explains the rest.
+      - name: Package deploy/
         working-directory: Quyen194-Item-Sorting
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
           $zipName = "Quyen194ItemSorting-$tag.zip"
-          Compress-Archive -Path "deploy/d2rloader" -DestinationPath $zipName
+          foreach ($f in @("deploy/d2rloader", "deploy/README.md", "deploy/patch_mod_stash_layout.py")) {
+            if (-not (Test-Path $f)) { throw "missing $f -- did the post-build copy run?" }
+          }
+          Compress-Archive -Path "deploy/d2rloader", "deploy/README.md", "deploy/patch_mod_stash_layout.py" -DestinationPath $zipName
           echo "ZIP_PATH=Quyen194-Item-Sorting/$zipName" >> $env:GITHUB_ENV
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ZIP_PATH }}
+          files: |
+            ${{ env.ZIP_PATH }}
+            Quyen194-Item-Sorting/packaging/README.md
           generate_release_notes: true

@@ -13,9 +13,13 @@ mod's own layout files:
                                is selected, so these hide on the other tabs.
     - basicstash_container     Sort Personal Stash. This container is shown
                                on both the Personal and the Shared tab (they
-                               share one grid widget), so the button sits
-                               right of the shared-stash strip and always
-                               sorts the PERSONAL stash.
+                               share one grid widget), and no widget exists
+                               that only the Personal tab shows. So the
+                               button sits exactly UNDER the shared-stash
+                               Auto Sort button (same rect, inserted before
+                               SharedStashTabContainer, which draws on top):
+                               on the Shared tab Auto Sort covers it, on the
+                               Personal tab it is the only button there.
     - advancedstash_horadriccube
                                Sort Cube, on the stash dialog's cube tab
                                (Reimagined). Skipped if the mod has no such
@@ -118,16 +122,22 @@ SHARED_STRIP = Strip(
     must_keep=("StashNavigation",),
 )
 
-# Personal-stash Sort: same row as the shared strip, one slot to its right
-# (x = 110 + 3 * (88 + 8) = 398), still left of StashNavigation (x=668).
+# Personal-stash Sort: same rect as the shared strip's Auto Sort button and
+# inserted as the FIRST child of basicstash_container, i.e. before
+# SharedStashTabContainer, which therefore draws on top of it. basicstash_
+# container is visible on both the Personal and the Shared tab and D2R has no
+# Personal-only container, so this is how the button disappears on the Shared
+# tab (covered by Auto Sort). v1 sat right of the shared strip (x=398) as the
+# last child and stayed visible on the Shared tab. If one click ever reaches
+# both buttons, the plugin drops the personal sort (see DoSortGrid).
 PERSONAL_STRIP = Strip(
     key="personal-stash",
     marker_prefix="Quyen194ItemSortingPersonalButtons_v",
-    version=1,
+    version=2,
     container="basicstash_container",
-    position="last",
-    x=398,
-    y=1508,
+    position="first",
+    x=SHARED_STRIP.x,
+    y=SHARED_STRIP.y,
     buttons=[("QisSortPersonalStashButton", "stash_btn_autosort", "SortPersonalStashTooltip", "ActionSortPersonalStash")],
     must_keep=("grid",),
 )

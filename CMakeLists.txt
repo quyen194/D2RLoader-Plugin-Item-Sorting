@@ -114,6 +114,17 @@ add_custom_command(TARGET Quyen194ItemSorting POST_BUILD
 	VERBATIM
 )
 
+# The install guide and the mod layout patch script ship at the top of
+# deploy/, next to the d2rloader folder (packaging/README.md is the end-user
+# guide; the repo's own README.md is the developer documentation).
+set(QIS_DEPLOY_DIR "${CMAKE_SOURCE_DIR}/deploy")
+add_custom_command(TARGET Quyen194ItemSorting POST_BUILD
+	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/packaging/README.md" "${QIS_DEPLOY_DIR}/README.md"
+	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/tools/patch_mod_stash_layout.py" "${QIS_DEPLOY_DIR}/patch_mod_stash_layout.py"
+	COMMENT "Copying the install README and patch_mod_stash_layout.py into deploy/"
+	VERBATIM
+)
+
 # --- Companion "d2rl-quyen194-item-sorting.mpq" resource folder --------------
 # Dev-mode companion MPQ (README: "During development, the companion may be
 # a folder. Use a packed MPQ for release."). D2RCore finds it beside the DLL

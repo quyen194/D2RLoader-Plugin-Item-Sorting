@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <functional>
@@ -83,6 +84,19 @@ Panels::RegistrationHandle g_actionSortCubePanel          = Panels::InvalidHandl
 // stock panel -- see ui_layouts.hpp). The personal-stash and cube buttons
 // live in the mod's own layouts instead (tools/patch_mod_stash_layout.py).
 Panels::ChildLayoutHandle g_inventoryToolsChildLayout = Panels::InvalidChildLayoutHandle;
+
+// The personal stash's Sort button sits exactly under the shared stash's Auto
+// Sort button (tools/patch_mod_stash_layout.py: D2R has no container that only
+// the Personal tab shows, so on the Shared tab Auto Sort covers it). If one
+// click ever reaches both, DoSortGrid drops the personal sort: these are the
+// UI-thread click times, in steady_clock milliseconds, compared there.
+std::atomic<int64_t> g_lastAutoSortClickMs { -1000000 };
+std::atomic<int64_t> g_lastPersonalSortClickMs { -1000000 };
+constexpr int64_t    kSameClickWindowMs = 500;
+
+int64_t NowMs() {
+	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 // The SDK has no query for "which shared-stash tab is on screen right now"
 // or "how many active shared-stash tabs exist" (see README "Known gaps").
@@ -1308,6 +1322,14 @@ void __cdecl DoSortGrid(const PluginContext* ctx, void* userData) noexcept {
 
 	// Hot reload: every setting of every section, `enabled` included. Also
 	// refreshes mod_data_path's classification tables (see LoadConfig).
+	if (target == GridTarget::PersonalStash) {
+		const int64_t delta = g_lastPersonalSortClickMs.load() - g_lastAutoSortClickMs.load();
+		if (delta > -kSameClickWindowMs && delta < kSameClickWindowMs) {
+			ctx->LogInfo((tag + "ignored -- the same click also hit the shared stash's Auto Sort button on top of it (Shared tab).").c_str());
+			return;
+		}
+	}
+
 	const Config fresh = LoadConfig(ctx);
 	if (!fresh.fileError.empty()) {
 		ctx->LogWarn((tag + "sort skipped -- quyen194-item-sorting.toml is not valid TOML: " + fresh.fileError).c_str());
@@ -1669,7 +1691,11 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 	// on the game thread after a fresh config read (hot reload), not here.
 	GridTarget gridTarget {};
 	bool       isGridAction = true;
+	if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionAutoSort") == 0) {
+		g_lastAutoSortClickMs.store(NowMs()); // see g_lastAutoSortClickMs
+	}
 	if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionSortPersonalStash") == 0) {
+		g_lastPersonalSortClickMs.store(NowMs());
 		gridTarget = GridTarget::PersonalStash;
 	} else if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionSortInventory") == 0) {
 		gridTarget = GridTarget::Inventory;
