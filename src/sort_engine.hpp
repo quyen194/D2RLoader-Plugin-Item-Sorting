@@ -144,7 +144,7 @@ struct CategorySpan {
 std::vector<CategorySpec> DefaultLayout();
 
 // True when `id` is a mode_id sort_engine.cpp knows how to run (i.e. a valid
-// value for a config [[quyen194-item-sorting.layout]] entry's mode_id).
+// value for a config [[item-sorting.layout]] entry's mode_id).
 bool IsKnownModeId(const std::string& id);
 
 // --- Building blocks shared with the single-grid engine (grid_sort.hpp) ---

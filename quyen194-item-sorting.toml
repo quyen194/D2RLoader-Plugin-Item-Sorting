@@ -4,23 +4,23 @@
 # you've already edited.
 #
 # ── File structure ─────────────────────────────────────────────────────────
-#   [quyen194-item-sorting]                  plugin-wide settings (this block)
-#   [quyen194-item-sorting.shared_stash]     shared stash: Auto Sort / Add Page /
+#   [item-sorting]                  plugin-wide settings (this block)
+#   [item-sorting.shared_stash]     shared stash: Auto Sort / Add Page /
 #     [[...shared_stash.layout]]             Remove Page, one entry per category
-#   [quyen194-item-sorting.personal_stash]   personal stash Sort
-#   [quyen194-item-sorting.inventory]        inventory Sort
-#   [quyen194-item-sorting.cube]             Horadric Cube Sort
+#   [item-sorting.personal_stash]   personal stash Sort
+#   [item-sorting.inventory]        inventory Sort
+#   [item-sorting.cube]             Horadric Cube Sort
 #
 # ── What reloads when, without restarting the game ─────────────────────────
 #   Read ONCE, when the game starts (restart to change):
-#     everything in this [quyen194-item-sorting] block.
+#     everything in this [item-sorting] block.
 #   Read again while you play:
 #     every section below it. Each button press re-reads its own section
 #     (the shared-stash buttons also re-read `enabled`, `add_page_enabled`
 #     and `remove_page_enabled` every time the stash opens, to show/hide
 #     themselves), so an edit takes effect on the next press.
 
-[quyen194-item-sorting]
+[item-sorting]
 
 # Master switch for the whole plugin -- true | false. false: the plugin loads
 # but registers nothing (no actions, no inventory button, no toast); buttons
@@ -67,7 +67,7 @@ mod_data_path = ""
 # and Remove Page each re-read it on every press, and opening the stash
 # re-reads `enabled` / `add_page_enabled` / `remove_page_enabled` to show or
 # hide the buttons.
-[quyen194-item-sorting.shared_stash]
+[item-sorting.shared_stash]
 
 # true | false. false hides all three shared-stash buttons (applied the next
 # time the stash opens or you switch stash tabs) and makes them do nothing if
@@ -130,7 +130,7 @@ add_empty_page_when = "never"
 # instead, same as any other item this file doesn't give a dedicated
 # category to.
 #
-# Every [[quyen194-item-sorting.shared_stash.layout]] entry accepts:
+# Every [[item-sorting.shared_stash.layout]] entry accepts:
 #
 #   mode_id              -- required. One of: set, uniqueGear, uniqueRingAmu,
 #                            rareRingAmu, magicRingAmu, uniqueCharm,
@@ -203,56 +203,56 @@ add_empty_page_when = "never"
 #                            Bolts, stays right after xbow -- unless you
 #                            explicitly split them apart in your own list.)
 
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "uniqueGear"
 min_tabs = 5
 add_empty_page_when = "never"
 gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "knif", "blun", "scep", "wand", "staf", "orb", "spea", "pole", "jave", "bow", "bowq", "xbow", "xboq", "h2h", "weap"]
 sort_keys = ["handTier", "gearGroup", "quality", "reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "uniqueRingAmu"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["quality", "reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "rareRingAmu"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "magicRingAmu"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "uniqueCharm"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["-size", "quality", "reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "magicCharm"
 min_tabs = 2
 add_empty_page_when = "never"
 sort_keys = ["-size", "reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "uniqueJewel"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["quality", "reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "rareMagicJewel"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "set"
 min_tabs = 6
 # Always add a breathing page after Set gear -- its tabs tend to fill
@@ -260,7 +260,7 @@ min_tabs = 6
 add_empty_page_when = "always"
 sort_keys = ["setName", "reqLevel", "-ilvl", "itemName"]
 
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "rareGear"
 min_tabs = 1
 # Never add a breathing page after Rare gear -- with the quality-tier gear
@@ -274,7 +274,7 @@ sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
 # helm/weapon/etc had no dedicated category and fell all the way through to
 # "unclassified" below; now it gets its own tab(s) like every other quality
 # tier already had.
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "magicGear"
 min_tabs = 1
 add_empty_page_when = "never"
@@ -282,7 +282,7 @@ gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "k
 sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
 
 # NEW -- Superior-quality gear (same idea as magicGear above, one tier down).
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "superiorGear"
 min_tabs = 1
 add_empty_page_when = "never"
@@ -290,7 +290,7 @@ gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "k
 sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
 
 # NEW -- Normal/white-quality gear (same idea, the plain base-item tier).
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "normalGear"
 min_tabs = 1
 add_empty_page_when = "never"
@@ -302,7 +302,7 @@ sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
 # entirely, and anything this plugin doesn't classify at all (quest items,
 # keys, potions, etc). Placed last so it never steals tabs from a real
 # category ahead of it.
-[[quyen194-item-sorting.shared_stash.layout]]
+[[item-sorting.shared_stash.layout]]
 mode_id = "unclassified"
 min_tabs = 1
 add_empty_page_when = "never"
@@ -331,9 +331,9 @@ sort_keys = ["quality", "reqLevel", "name"]
 # and zone / anchor / fill_direction / category_break exist instead.
 #
 # ── The three sections share one format ────────────────────────────────────
-#   [quyen194-item-sorting.personal_stash]   + [[...personal_stash.layout]]
-#   [quyen194-item-sorting.inventory]        + [[...inventory.layout]]
-#   [quyen194-item-sorting.cube]             + [[...cube.layout]]
+#   [item-sorting.personal_stash]   + [[...personal_stash.layout]]
+#   [item-sorting.inventory]        + [[...inventory.layout]]
+#   [item-sorting.cube]             + [[...cube.layout]]
 # Every key below is accepted by all three sections. The only differences
 # are the shipped default values. A key you leave out takes its shipped
 # default; a section you leave out entirely uses the shipped defaults too.
@@ -517,7 +517,7 @@ sort_keys = ["quality", "reqLevel", "name"]
 # ═══════════════════════════════════════════════════════════════════════════
 #  PERSONAL STASH
 # ═══════════════════════════════════════════════════════════════════════════
-[quyen194-item-sorting.personal_stash]
+[item-sorting.personal_stash]
 enabled = true
 grid_width = 16
 grid_height = 13
@@ -528,31 +528,31 @@ locked_cells = []
 keep_in_place = []
 
 # Runes always live in the two right-most columns, El at the top.
-[[quyen194-item-sorting.personal_stash.layout]]
+[[item-sorting.personal_stash.layout]]
 mode_id = "rune"
 anchor = "topRight"
 zone = { x = 14, y = 0, w = 2, h = 13 }
 sort_keys = ["runeNumber"]
 
-[[quyen194-item-sorting.personal_stash.layout]]
+[[item-sorting.personal_stash.layout]]
 mode_id = "gem"
 sort_keys = ["gemType", "-gemGrade"]
 
-[[quyen194-item-sorting.personal_stash.layout]]
+[[item-sorting.personal_stash.layout]]
 mode_ids = ["uniqueCharm", "magicCharm"]
 sort_keys = ["-size", "quality", "reqLevel", "name"]
 
-[[quyen194-item-sorting.personal_stash.layout]]
+[[item-sorting.personal_stash.layout]]
 mode_ids = ["uniqueJewel", "rareMagicJewel", "uniqueRingAmu", "rareRingAmu", "magicRingAmu"]
 sort_keys = ["quality", "reqLevel", "name"]
 
-[[quyen194-item-sorting.personal_stash.layout]]
+[[item-sorting.personal_stash.layout]]
 mode_ids = ["uniqueGear", "set", "rareGear", "magicGear", "superiorGear", "normalGear"]
 gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "knif", "blun", "scep", "wand", "staf", "orb", "spea", "pole", "jave", "bow", "bowq", "xbow", "xboq", "h2h", "weap"]
 sort_keys = ["-area", "handTier", "gearGroup", "quality", "reqLevel"]
 
 # Potions, tools, quest items and anything else.
-[[quyen194-item-sorting.personal_stash.layout]]
+[[item-sorting.personal_stash.layout]]
 mode_id = "unclassified"
 anchor = "bottomLeft"
 sort_keys = ["-area", "name"]
@@ -561,7 +561,7 @@ sort_keys = ["-area", "name"]
 # ═══════════════════════════════════════════════════════════════════════════
 #  INVENTORY
 # ═══════════════════════════════════════════════════════════════════════════
-[quyen194-item-sorting.inventory]
+[item-sorting.inventory]
 enabled = true
 grid_width = 10
 grid_height = 8
@@ -576,20 +576,20 @@ locked_cells = []
 keep_in_place = ["uniqueCharm", "magicCharm"]
 
 # Horadric Cube, tomes, scrolls, keys: top-right corner.
-[[quyen194-item-sorting.inventory.layout]]
+[[item-sorting.inventory.layout]]
 mode_id = "tool"
 anchor = "topRight"
 sort_keys = ["-area", "name"]
 
 # Everything you pick up: top-left corner, so the free block stays in the
 # middle/right for more looting.
-[[quyen194-item-sorting.inventory.layout]]
+[[item-sorting.inventory.layout]]
 mode_id = "unclassified"
 anchor = "topLeft"
 sort_keys = ["-area", "quality", "name"]
 
 # Optional -- only if charms are removed from keep_in_place above:
-# [[quyen194-item-sorting.inventory.layout]]
+# [[item-sorting.inventory.layout]]
 # mode_ids = ["uniqueCharm", "magicCharm"]
 # anchor = "bottomRight"
 # sort_keys = ["-size", "quality"]
@@ -598,7 +598,7 @@ sort_keys = ["-area", "quality", "name"]
 # ═══════════════════════════════════════════════════════════════════════════
 #  HORADRIC CUBE
 # ═══════════════════════════════════════════════════════════════════════════
-[quyen194-item-sorting.cube]
+[item-sorting.cube]
 enabled = true
 grid_width = 12
 grid_height = 8
@@ -608,15 +608,15 @@ on_overflow = "compact"
 locked_cells = []
 keep_in_place = []
 
-[[quyen194-item-sorting.cube.layout]]
+[[item-sorting.cube.layout]]
 mode_id = "rune"
 sort_keys = ["runeNumber"]
 
-[[quyen194-item-sorting.cube.layout]]
+[[item-sorting.cube.layout]]
 mode_id = "gem"
 sort_keys = ["gemType", "-gemGrade"]
 
-[[quyen194-item-sorting.cube.layout]]
+[[item-sorting.cube.layout]]
 mode_id = "unclassified"
 sort_keys = ["-area", "name"]
 

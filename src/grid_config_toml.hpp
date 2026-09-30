@@ -1,6 +1,6 @@
 #pragma once
 
-// TOML -> Grid::Config for the [quyen194-item-sorting.personal_stash] /
+// TOML -> Grid::Config for the [item-sorting.personal_stash] /
 // .inventory / .cube sections. Header-only and free of D2RLPlugin so the
 // Linux test harness (tests/grid_sort_test.cpp) can run it against the real
 // shipped config file.
@@ -74,9 +74,9 @@ inline ParsedSection ParseGridSection(const toml::table& root, const std::string
 	using namespace TomlDetail;
 	ParsedSection out;
 	out.config            = DefaultConfig(section);
-	const std::string pfx = "[quyen194-item-sorting." + section + "] ";
+	const std::string pfx = "[item-sorting." + section + "] ";
 
-	const toml::table* plugin = root["quyen194-item-sorting"].as_table();
+	const toml::table* plugin = root["item-sorting"].as_table();
 	const toml::table* t      = plugin != nullptr ? (*plugin)[section].as_table() : nullptr;
 	if (t == nullptr) {
 		out.warnings.push_back(pfx + "section not found in the config file; using the built-in defaults");
@@ -139,7 +139,7 @@ inline ParsedSection ParseGridSection(const toml::table& root, const std::string
 	if (const auto* n = t->get("layout")) {
 		const auto* arr = n->as_array();
 		if (arr == nullptr) {
-			err("layout must be written as [[quyen194-item-sorting." + section + ".layout]] entries");
+			err("layout must be written as [[item-sorting." + section + ".layout]] entries");
 		} else {
 			cfg.layout.clear();
 			size_t index = 0;

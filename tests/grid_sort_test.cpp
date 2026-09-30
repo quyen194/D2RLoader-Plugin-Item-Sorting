@@ -163,15 +163,15 @@ static void TestShippedConfig() {
 	// Plugin-wide block holds only plugin-wide keys; the shared stash has its
 	// own section (plugin.cpp's LoadConfig warns about the legacy locations).
 	{
-		const auto* top = root["quyen194-item-sorting"].as_table();
-		CHECK(top != nullptr, "[quyen194-item-sorting] exists");
+		const auto* top = root["item-sorting"].as_table();
+		CHECK(top != nullptr, "[item-sorting] exists");
 		const std::set<std::string> allowedTop = { "enabled", "notification_channel", "notification_seconds", "debug_log_ui_messages",
 			"mod_data_path", "shared_stash", "personal_stash", "inventory", "cube" };
 		for (auto&& [k, v] : *top) {
 			(void)v;
 			CHECK(allowedTop.count(std::string(k.str())) == 1, "unexpected top-level key '%s'", std::string(k.str()).c_str());
 		}
-		auto shared = root["quyen194-item-sorting"]["shared_stash"];
+		auto shared = root["item-sorting"]["shared_stash"];
 		CHECK(shared["enabled"].value<bool>().value_or(false), "shared_stash.enabled");
 		CHECK(shared["grid_width"].value<int64_t>().value_or(0) == 16 && shared["grid_height"].value<int64_t>().value_or(0) == 13, "shared grid 16x13");
 		const auto* layout = shared["layout"].as_array();
@@ -189,21 +189,21 @@ static void TestShippedConfig() {
 	}
 
 	// A missing section falls back to defaults with a warning, not an error.
-	toml::table empty = toml::parse("[quyen194-item-sorting]\nenabled = true\n");
+	toml::table empty = toml::parse("[item-sorting]\nenabled = true\n");
 	auto parsed       = Grid::ParseGridSection(empty, "cube");
 	CHECK(parsed.errors.empty() && parsed.warnings.size() == 1 && parsed.config.width == 12, "missing section -> defaults");
 
 	// Bad values are errors, never silently replaced.
 	toml::table bad = toml::parse(R"(
-[quyen194-item-sorting.inventory]
+[item-sorting.inventory]
 grid_width = 20
 fill_direction = "diagonal"
 locked_cells = [ { x = 1, y = 2 } ]
 typo_key = 1
-[[quyen194-item-sorting.inventory.layout]]
+[[item-sorting.inventory.layout]]
 mode_id = "rune"
 mode_ids = ["gem"]
-[[quyen194-item-sorting.inventory.layout]]
+[[item-sorting.inventory.layout]]
 mode_id = "gem"
 anchor = "middle"
 )");
