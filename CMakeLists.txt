@@ -104,6 +104,16 @@ add_custom_command(TARGET Quyen194ItemSorting POST_BUILD
 	VERBATIM
 )
 
+# The default quyen194-item-sorting.toml ships beside the plugins folder, in
+# deploy/d2rloader/config, so the Release zip carries an editable config too.
+set(QIS_DEPLOY_CONFIG_DIR "${CMAKE_SOURCE_DIR}/deploy/d2rloader/config")
+add_custom_command(TARGET Quyen194ItemSorting POST_BUILD
+	COMMAND "${CMAKE_COMMAND}" -E make_directory "${QIS_DEPLOY_CONFIG_DIR}"
+	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/quyen194-item-sorting.toml" "${QIS_DEPLOY_CONFIG_DIR}/"
+	COMMENT "Copying quyen194-item-sorting.toml into deploy/d2rloader/config"
+	VERBATIM
+)
+
 # --- Companion "d2rl-quyen194-item-sorting.mpq" resource folder --------------
 # Dev-mode companion MPQ (README: "During development, the companion may be
 # a folder. Use a packed MPQ for release."). D2RCore finds it beside the DLL
