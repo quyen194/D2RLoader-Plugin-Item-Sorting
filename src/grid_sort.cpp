@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <optional>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace Quyen194ItemSorting::Grid {
@@ -349,6 +350,240 @@ std::vector<std::string> ValidateConfig(const Config& cfg) {
 		}
 	}
 	return errors;
+}
+
+Sequence SequenceForLiveApply(const std::vector<ItemFacts>& items, const std::vector<PlannedMove>& moves, uint32_t width, uint32_t height) {
+	Sequence out;
+	const int32_t W = static_cast<int32_t>(width);
+	const int32_t H = static_cast<int32_t>(height);
+
+	struct Live {
+		int32_t x, y, w, h;
+	};
+	std::unordered_map<uint64_t, Live> live; // every item's current cells
+	std::vector<uint64_t>              owner(static_cast<size_t>(W) * H, 0);
+	auto cellsDo = [&](const Live& l, auto&& fn) {
+		for (int32_t yy = std::max(0, l.y); yy < std::min(H, l.y + l.h); ++yy)
+			for (int32_t xx = std::max(0, l.x); xx < std::min(W, l.x + l.w); ++xx) fn(static_cast<size_t>(yy) * W + static_cast<size_t>(xx));
+	};
+	for (const auto& it : items) {
+		Live l { it.x, it.y, static_cast<int32_t>(it.w), static_cast<int32_t>(it.h) };
+		live[it.handle] = l;
+		cellsDo(l, [&](size_t idx) { owner[idx] = it.handle; });
+	}
+	// `self` may overlap its own old cells: the game lifts an item out of the
+	// grid before placing it (exactly what a player does when dropping an
+	// item one cell over from where it was). Only OTHER items block.
+	auto allFree = [&](int32_t x, int32_t y, int32_t w, int32_t h, uint64_t self) {
+		if (x < 0 || y < 0 || x + w > W || y + h > H) return false;
+		for (int32_t yy = y; yy < y + h; ++yy)
+			for (int32_t xx = x; xx < x + w; ++xx) {
+				const uint64_t o = owner[static_cast<size_t>(yy) * W + static_cast<size_t>(xx)];
+				if (o != 0 && o != self) return false;
+			}
+		return true;
+	};
+	auto apply = [&](uint64_t handle, int32_t x, int32_t y) {
+		Live& l = live[handle];
+		cellsDo(l, [&](size_t idx) { owner[idx] = 0; });
+		l.x = x;
+		l.y = y;
+		cellsDo(l, [&](size_t idx) { owner[idx] = handle; });
+		out.steps.push_back(PlannedMove { .handle = handle, .destTab = 0, .destX = x, .destY = y });
+	};
+
+	std::vector<PlannedMove> pending;
+	for (const auto& mv : moves) {
+		auto it = live.find(mv.handle);
+		if (it == live.end()) {
+			out.error = "move for an unknown item handle";
+			return out;
+		}
+		if (it->second.x == mv.destX && it->second.y == mv.destY) continue;
+		pending.push_back(mv);
+	}
+
+	// Cells some pending move still has to land on; parking avoids them when
+	// it can so it doesn't create new blocks.
+	auto reservedMask = [&]() {
+		std::vector<bool> mask(static_cast<size_t>(W) * H, false);
+		for (const auto& mv : pending) {
+			const Live& l = live[mv.handle];
+			for (int32_t yy = mv.destY; yy < mv.destY + l.h; ++yy)
+				for (int32_t xx = mv.destX; xx < mv.destX + l.w; ++xx) mask[static_cast<size_t>(yy) * W + static_cast<size_t>(xx)] = true;
+		}
+		return mask;
+	};
+
+	const size_t maxRounds = moves.size() * 4 + 64;
+	size_t       rounds    = 0;
+	while (!pending.empty()) {
+		if (++rounds > maxRounds) {
+			out.error = "no safe move order found (gave up after " + std::to_string(maxRounds) + " rounds)";
+			return out;
+		}
+
+		// 1) Every move whose destination is completely empty right now.
+		bool progress = false;
+		for (size_t i = 0; i < pending.size();) {
+			const PlannedMove mv = pending[i];
+			const Live&       l  = live[mv.handle];
+			if (allFree(mv.destX, mv.destY, l.w, l.h, mv.handle)) {
+				apply(mv.handle, mv.destX, mv.destY);
+				pending.erase(pending.begin() + static_cast<std::ptrdiff_t>(i));
+				progress = true;
+			} else {
+				++i;
+			}
+		}
+		if (progress) continue;
+
+		// 2) Everything left is blocked. Pick one pending move M and clear its
+		// destination: park every item standing on it (M's own item included,
+		// when M overlaps its old cells) on free cells OUTSIDE M's destination,
+		// preferring cells no other pending move needs, then move M. Every
+		// round therefore finishes one move, so this always terminates.
+		// Destinations of finished moves never overlap M's (the plan is
+		// collision-free), so the blockers are always pending items. Try the
+		// moves with the fewest / smallest blockers first.
+		const auto reserved = reservedMask();
+		struct Option {
+			size_t                index;
+			std::vector<uint64_t> blockers;
+			int32_t               blockerArea;
+		};
+		std::vector<Option> options;
+		for (size_t i = 0; i < pending.size(); ++i) {
+			const PlannedMove& mv = pending[i];
+			const Live&        l  = live[mv.handle];
+			std::vector<uint64_t> blockers;
+			for (int32_t yy = mv.destY; yy < mv.destY + l.h; ++yy)
+				for (int32_t xx = mv.destX; xx < mv.destX + l.w; ++xx) {
+					const uint64_t o = owner[static_cast<size_t>(yy) * W + static_cast<size_t>(xx)];
+					if (o != 0 && o != mv.handle && std::find(blockers.begin(), blockers.end(), o) == blockers.end()) blockers.push_back(o);
+				}
+			int32_t area = 0;
+			for (uint64_t b : blockers) area += live[b].w * live[b].h;
+			options.push_back(Option { i, std::move(blockers), area });
+		}
+		std::stable_sort(options.begin(), options.end(), [](const Option& a, const Option& b) {
+			if (a.blockers.size() != b.blockers.size()) return a.blockers.size() < b.blockers.size();
+			return a.blockerArea < b.blockerArea;
+		});
+
+		bool done = false;
+		for (const Option& opt : options) {
+			const PlannedMove mv = pending[opt.index];
+			const Live        me = live[mv.handle];
+
+			// Simulate on copies; commit only if every blocker finds a spot.
+			auto                 ownerCopy = owner;
+			auto                 liveCopy  = live;
+			std::vector<PlannedMove> parks;
+			bool                 allParked = true;
+			std::vector<uint64_t> order = opt.blockers;
+			std::stable_sort(order.begin(), order.end(), [&](uint64_t a, uint64_t b) {
+				return live[a].w * live[a].h > live[b].w * live[b].h; // biggest first: hardest to fit
+			});
+			for (uint64_t b : order) {
+				Live& lb = liveCopy[b];
+				bool  placed = false;
+				for (int pass = 0; pass < 2 && !placed; ++pass) { // pass 0: avoid other pending destinations
+					for (int32_t y = 0; y + lb.h <= H && !placed; ++y) {
+						for (int32_t x = 0; x + lb.w <= W && !placed; ++x) {
+							bool ok = true;
+							for (int32_t yy = y; yy < y + lb.h && ok; ++yy)
+								for (int32_t xx = x; xx < x + lb.w && ok; ++xx) {
+									const size_t idx = static_cast<size_t>(yy) * W + static_cast<size_t>(xx);
+									const bool inDest = xx >= mv.destX && xx < mv.destX + me.w && yy >= mv.destY && yy < mv.destY + me.h;
+									ok = (ownerCopy[idx] == 0 || ownerCopy[idx] == b) && !inDest && (pass == 1 || !reserved[idx]);
+								}
+							if (!ok) continue;
+							for (int32_t yy = std::max(0, lb.y); yy < std::min(H, lb.y + lb.h); ++yy)
+								for (int32_t xx = std::max(0, lb.x); xx < std::min(W, lb.x + lb.w); ++xx) ownerCopy[static_cast<size_t>(yy) * W + static_cast<size_t>(xx)] = 0;
+							lb.x = x;
+							lb.y = y;
+							for (int32_t yy = y; yy < y + lb.h; ++yy)
+								for (int32_t xx = x; xx < x + lb.w; ++xx) ownerCopy[static_cast<size_t>(yy) * W + static_cast<size_t>(xx)] = b;
+							parks.push_back(PlannedMove { .handle = b, .destTab = 0, .destX = x, .destY = y });
+							placed = true;
+						}
+					}
+				}
+				if (!placed) {
+					allParked = false;
+					break;
+				}
+			}
+			if (!allParked) continue;
+
+			for (const auto& pk : parks) apply(pk.handle, pk.destX, pk.destY);
+			out.parkingMoves += static_cast<uint32_t>(parks.size());
+			apply(mv.handle, mv.destX, mv.destY);
+			pending.erase(pending.begin() + static_cast<std::ptrdiff_t>(opt.index));
+			done = true;
+			break;
+		}
+		if (!done) {
+			// 3) No destination can be cleared in one go. Reshape the free
+			// space instead: move one pending item that sits on some pending
+			// destination to any other free spot (first avoiding pending
+			// destinations), smallest first, and try again next round.
+			// maxRounds bounds this.
+			std::vector<size_t> candidates;
+			for (size_t i = 0; i < pending.size(); ++i) {
+				const Live& l      = live[pending[i].handle];
+				bool        blocks = false;
+				cellsDo(l, [&](size_t idx) { blocks = blocks || reserved[idx]; });
+				if (blocks) candidates.push_back(i);
+			}
+			std::stable_sort(candidates.begin(), candidates.end(), [&](size_t a, size_t b) {
+				const Live& la = live[pending[a].handle];
+				const Live& lb = live[pending[b].handle];
+				return la.w * la.h < lb.w * lb.h;
+			});
+			// Rotate the start so repeated rounds don't keep shuffling the same item.
+			if (!candidates.empty()) std::rotate(candidates.begin(), candidates.begin() + static_cast<std::ptrdiff_t>(rounds % candidates.size()), candidates.end());
+			for (int pass = 0; pass < 2 && !done; ++pass) {
+				for (size_t ci : candidates) {
+					const uint64_t handle = pending[ci].handle;
+					const Live     l      = live[handle];
+					for (int32_t y = 0; y + l.h <= H && !done; ++y) {
+						for (int32_t x = 0; x + l.w <= W && !done; ++x) {
+							if (x == l.x && y == l.y) continue;
+							if (!allFree(x, y, l.w, l.h, handle)) continue;
+							bool clash = false;
+							for (int32_t yy = y; yy < y + l.h && !clash; ++yy)
+								for (int32_t xx = x; xx < x + l.w && !clash; ++xx) {
+									const bool ownOld = xx >= l.x && xx < l.x + l.w && yy >= l.y && yy < l.y + l.h;
+									clash = !ownOld && (pass == 0 ? reserved[static_cast<size_t>(yy) * W + static_cast<size_t>(xx)] : false);
+								}
+							if (clash) continue;
+							// Must actually free a reserved cell, or it's no progress.
+							bool frees = false;
+							for (int32_t yy = l.y; yy < l.y + l.h && !frees; ++yy)
+								for (int32_t xx = l.x; xx < l.x + l.w && !frees; ++xx)
+									frees = reserved[static_cast<size_t>(yy) * W + static_cast<size_t>(xx)]
+									     && !(xx >= x && xx < x + l.w && yy >= y && yy < y + l.h);
+							if (!frees) continue;
+							apply(handle, x, y);
+							++out.parkingMoves;
+							done = true;
+						}
+					}
+					if (done) break;
+				}
+			}
+		}
+		if (!done) {
+			out.error = "no safe move order: " + std::to_string(pending.size()) +
+			            " item(s) block each other and there is not enough free space to move them aside (grid too full)";
+			return out;
+		}
+	}
+
+	out.ok = true;
+	return out;
 }
 
 Plan PlanSort(const std::vector<ItemFacts>& items, const Config& cfg) {

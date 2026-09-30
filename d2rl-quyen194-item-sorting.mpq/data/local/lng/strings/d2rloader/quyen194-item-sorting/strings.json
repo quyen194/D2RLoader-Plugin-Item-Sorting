@@ -26,5 +26,6 @@
 	{ "Key": "MsgGridSortDisabled", "enUS": "Sort: disabled (enabled = false) in quyen194-item-sorting.toml." },
 	{ "Key": "MsgGridSortConfigError", "enUS": "Sort failed: invalid settings in quyen194-item-sorting.toml. See the plugin log for the exact problem." },
 	{ "Key": "MsgGridSortNoRoom", "enUS": "Sort failed: the items don't fit in the new arrangement. Nothing was moved." },
-	{ "Key": "MsgGridSortRejected", "enUS": "Sort failed: the game rejected the moves. Nothing was moved. See the plugin log." }
+	{ "Key": "MsgGridSortRejected", "enUS": "Sort stopped: the game rejected a move. Items moved so far stay where they are; nothing is lost. See the plugin log." },
+	{ "Key": "MsgGridSortTooFull", "enUS": "Sort skipped: too full to rearrange safely. Nothing was moved - free a few cells and try again." }
 ]

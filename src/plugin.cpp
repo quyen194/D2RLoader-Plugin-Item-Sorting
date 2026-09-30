@@ -697,6 +697,17 @@ auto ApplyMoves(
 	if (moves.empty()) {
 		return Items::Result::Success;
 	}
+	if (sequenced.unsafe) {
+		// See SequencedMoves::unsafe: never let the game see a move onto an
+		// occupied cell -- that is how the single-grid sort lost items.
+		for (const auto& note : sequenced.diagnostics) {
+			ctx->LogWarn(("quyen194-item-sorting: move ordering: " + note).c_str());
+		}
+		ctx->LogWarn(
+			"quyen194-item-sorting: no safe move order exists for this plan (a dependency cycle has no free scratch cell); refusing to "
+			"apply it. Nothing was moved.");
+		return Items::Result::Conflict;
+	}
 
 	// Handle -> facts, purely for the rejection log below (what code/category
 	// was this?) -- never consulted for planning, which already happened.
@@ -1234,28 +1245,28 @@ const Quyen194ItemSorting::Grid::ParsedSection& SectionFor(const Config& cfg, Gr
 	return cfg.personalStash;
 }
 
-// Sends the whole plan as ONE transaction. The SDK validates every operation
-// against an occupancy model with all moved items lifted out first, so swaps
-// and chains need no ordering, and on any failure it restores every item --
-// which is exactly the "never a half-sorted grid" promise the config file
-// makes. (The shared stash's layered/bisecting ApplyMoves exists because a
-// full shared-stash plan can exceed one transaction's 4,096 operations; a
-// single grid holds at most 16 x 16 = 256 items.)
+// Applies a Grid::SequenceForLiveApply sequence: ONE move per transaction,
+// in order, stopping at the first rejection. Every step lands on cells no
+// other item occupies at that moment (that is what the sequence
+// guarantees), so each is an ordinary single-item move.
+//
+// History: this used to send the whole plan as a single transaction, per the
+// SDK README ("moved items are removed from a temporary occupancy model
+// first, so a single transaction can swap or chain their locations"). A live
+// run committed every move, yet the items moved onto cells another item of
+// the same plan still occupied vanished from the grid once that item moved
+// away (the cube and both tomes in the inventory, most of the personal
+// stash). One transaction per safe step avoids depending on how a
+// multi-operation transaction is applied. The price: a rejection midway
+// leaves the grid partly sorted (nothing is lost -- every item is on a cell
+// of its own).
 auto ApplyGridMoves(
-	const PluginContext* ctx, PlayerHandle player, Items::ItemContainer container, const std::vector<Quyen194ItemSorting::PlannedMove>& moves,
+	const PluginContext* ctx, PlayerHandle player, Items::ItemContainer container, const std::vector<Quyen194ItemSorting::PlannedMove>& steps,
 	const std::vector<Quyen194ItemSorting::ItemFacts>& items, const char* section, uint32_t* committed) -> Items::Result {
 	*committed = 0;
-	if (moves.empty()) {
-		return Items::Result::Success;
-	}
-	if (moves.size() > Items::MaxExistingItemOperations) {
-		ctx->LogWarn("quyen194-item-sorting: single-grid plan has more moves than one transaction allows; refusing to split it.");
-		return Items::Result::InvalidArgument;
-	}
+	for (size_t i = 0; i < steps.size(); ++i) {
+		const auto& mv = steps[i];
 
-	std::vector<Items::ExistingItemOperation> ops;
-	ops.reserve(moves.size());
-	for (const auto& mv : moves) {
 		Items::ExistingItemOperation op {};
 		op.structSize                       = Items::ExistingItemOperationSize;
 		op.kind                             = Items::ExistingItemOperationKind::Move;
@@ -1266,50 +1277,81 @@ auto ApplyGridMoves(
 		op.move.destination.x               = static_cast<uint32_t>(mv.destX);
 		op.move.destination.y               = static_cast<uint32_t>(mv.destY);
 		op.move.destination.sharedStashPage = 0; // ignored outside SharedStash
-		ops.push_back(op);
-	}
 
-	Items::ExistingItemTransaction txn {};
-	txn.structSize     = Items::ExistingItemTransactionSize;
-	txn.player         = player;
-	txn.operationCount = static_cast<uint32_t>(ops.size());
-	txn.operations     = ops.data();
+		Items::ExistingItemTransaction txn {};
+		txn.structSize     = Items::ExistingItemTransactionSize;
+		txn.player         = player;
+		txn.operationCount = 1;
+		txn.operations     = &op;
 
-	Items::ExistingItemTransactionResult result {};
-	result.structSize = Items::ExistingItemTransactionResultSize;
+		Items::ExistingItemTransactionResult result {};
+		result.structSize = Items::ExistingItemTransactionResultSize;
 
-	const auto txnResult = g_items->executeExistingItemTransaction(ctx, &txn, &result);
-	if (txnResult == Items::Result::Success) {
-		*committed = result.committedOperationCount;
-		return txnResult;
-	}
+		const auto txnResult = g_items->executeExistingItemTransaction(ctx, &txn, &result);
+		if (txnResult == Items::Result::Success) {
+			++*committed;
+			continue;
+		}
 
-	char msg[400];
-	if (result.failureIndex < ops.size()) {
-		const auto& op   = ops[result.failureIndex];
 		std::string code = "?";
 		std::string size = "?";
-		int32_t     fromX = -1, fromY = -1;
 		for (const auto& it : items) {
-			if (it.handle == static_cast<uint64_t>(op.item)) {
-				code  = UnpackItemCode(it.code);
-				size  = std::to_string(it.w) + "x" + std::to_string(it.h);
-				fromX = it.x;
-				fromY = it.y;
+			if (it.handle == mv.handle) {
+				code = UnpackItemCode(it.code);
+				size = std::to_string(it.w) + "x" + std::to_string(it.h);
 				break;
 			}
 		}
+		char msg[400];
 		std::snprintf(msg, sizeof(msg),
-			"quyen194-item-sorting: [%s] the game rejected the sort (result %u) at move %u/%zu: item '%s' (%s) (%d,%d) -> (%u,%u). "
-			"Nothing was moved.",
-			section, static_cast<unsigned>(txnResult), result.failureIndex + 1, ops.size(), code.c_str(), size.c_str(), fromX, fromY,
-			op.move.destination.x, op.move.destination.y);
-	} else {
-		std::snprintf(msg, sizeof(msg), "quyen194-item-sorting: [%s] the game rejected the sort (result %u) before any move. Nothing was moved.",
-			section, static_cast<unsigned>(txnResult));
+			"quyen194-item-sorting: [%s] the game rejected step %zu/%zu (result %u): item '%s' (%s) -> (%d,%d). Stopped here; the %zu "
+			"earlier step(s) stay applied, nothing is lost.",
+			section, i + 1, steps.size(), static_cast<unsigned>(txnResult), code.c_str(), size.c_str(), mv.destX, mv.destY, i);
+		ctx->LogWarn(msg);
+		return txnResult;
 	}
-	ctx->LogWarn(msg);
-	return txnResult;
+	return Items::Result::Success;
+}
+
+// Re-reads the container after a sort and compares it with the scan before
+// it: same number of items, every handle still present. A mismatch is logged
+// loudly -- that is the symptom the first live run showed.
+void VerifyGridAfterSort(const PluginContext* ctx, PlayerHandle player, Items::ItemContainer container,
+	const std::vector<Quyen194ItemSorting::ItemFacts>& before, const std::string& tag) {
+	EnumState after;
+	after.container = container;
+	const Inventory::ItemFilter filter {
+		.structSize    = Inventory::ItemFilterSize,
+		.containerMask = Items::ContainerBit(container),
+	};
+	if (g_inventory->forEachInventoryItem(ctx, player, &filter, CollectSharedStashItem, &after) != Inventory::Result::Success) {
+		ctx->LogWarn((tag + "post-sort check: could not re-read the container.").c_str());
+		return;
+	}
+	std::unordered_map<uint64_t, bool> seen;
+	for (const auto& it : after.facts) seen[it.handle] = true;
+	size_t missing = 0;
+	for (const auto& it : before) {
+		if (!seen.count(it.handle)) ++missing;
+	}
+	// Overlaps in the re-read positions would mean two items claim one cell.
+	size_t overlaps = 0;
+	for (size_t i = 0; i < after.facts.size(); ++i)
+		for (size_t j = i + 1; j < after.facts.size(); ++j) {
+			const auto& a = after.facts[i];
+			const auto& b = after.facts[j];
+			if (a.x < b.x + static_cast<int32_t>(b.w) && b.x < a.x + static_cast<int32_t>(a.w) && a.y < b.y + static_cast<int32_t>(b.h)
+				&& b.y < a.y + static_cast<int32_t>(a.h))
+				++overlaps;
+		}
+	char buf[300];
+	std::snprintf(buf, sizeof(buf), "%spost-sort check: %zu item(s) before, %zu after, %zu handle(s) missing, %zu overlapping pair(s).", tag.c_str(),
+		before.size(), after.facts.size(), missing, overlaps);
+	if (missing != 0 || overlaps != 0 || before.size() != after.facts.size()) {
+		ctx->LogError((std::string(buf) + " SOMETHING WENT WRONG -- please send this log.").c_str());
+	} else {
+		ctx->LogInfo(buf);
+	}
 }
 
 void __cdecl DoSortGrid(const PluginContext* ctx, void* userData) noexcept {
@@ -1397,7 +1439,7 @@ void __cdecl DoSortGrid(const PluginContext* ctx, void* userData) noexcept {
 		ctx->LogWarn((tag + "sort refused: the container reported items on more than one inventory page (see the scan line above). "
 		                    "Nothing was moved -- please report this log.")
 				.c_str());
-		QueueToast(ctx, UiLayouts::OutcomeMessage::GridSortRejected);
+		QueueToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		return;
 	}
 
@@ -1416,14 +1458,34 @@ void __cdecl DoSortGrid(const PluginContext* ctx, void* userData) noexcept {
 		return;
 	}
 
+	// Never let the game see a move onto a cell another item still occupies
+	// (see ApplyGridMoves): turn the plan into single-item steps that each
+	// land on free cells, parking blockers aside where needed. Simulated in
+	// full before anything moves.
+	const auto sequence = Grid::SequenceForLiveApply(state.facts, plan.moves, section.config.width, section.config.height);
+	if (!sequence.ok) {
+		ctx->LogWarn((tag + "sort skipped, nothing moved: " + sequence.error).c_str());
+		QueueToast(ctx, UiLayouts::OutcomeMessage::GridSortTooFull);
+		return;
+	}
+	{
+		char buf[200];
+		std::snprintf(buf, sizeof(buf), "%s%zu planned move(s) -> %zu live step(s) (%u temporary).", tag.c_str(), plan.moves.size(),
+			sequence.steps.size(), sequence.parkingMoves);
+		ctx->LogInfo(buf);
+	}
+
 	uint32_t   committed = 0;
-	const auto txnResult = ApplyGridMoves(ctx, player, info.container, plan.moves, state.facts, info.section, &committed);
+	const auto txnResult = ApplyGridMoves(ctx, player, info.container, sequence.steps, state.facts, info.section, &committed);
+	if (committed != 0) {
+		VerifyGridAfterSort(ctx, player, info.container, state.facts, tag);
+	}
 
 	char summary[320];
 	std::snprintf(summary, sizeof(summary),
-		"%sarranged %u item(s) (%u fixed in place, %u outside the grid%s); %zu move(s) planned, %u committed (result %u).", tag.c_str(),
-		plan.itemsArranged, plan.itemsFixed, plan.itemsOutsideGrid, plan.compactRetryUsed ? ", needed the compact retry" : "", plan.moves.size(),
-		committed, static_cast<unsigned>(txnResult));
+		"%sarranged %u item(s) (%u fixed in place, %u outside the grid%s); %zu step(s), %u committed (result %u).", tag.c_str(),
+		plan.itemsArranged, plan.itemsFixed, plan.itemsOutsideGrid, plan.compactRetryUsed ? ", needed the compact retry" : "",
+		sequence.steps.size(), committed, static_cast<unsigned>(txnResult));
 	ctx->LogInfo(summary);
 
 	if (txnResult == Items::Result::NotAuthoritative) {

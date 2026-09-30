@@ -1172,13 +1172,26 @@ the log) -- it never silently falls back to some other value.
    column/row.
 5. If something doesn't fit: `on_overflow = "compact"` retries once without
    bands, otherwise (or if that fails too) nothing is moved.
-6. The plan (only the items whose cell changes) is sent as **one**
-   `executeExistingItemTransaction`. The SDK validates it against an occupancy
-   model with every moved item lifted out first, so swaps/chains need no
-   ordering, and restores everything on failure -- so a grid is never
-   half-sorted. (The shared stash's layered/bisecting `ApplyMoves` is not used
-   here: a grid holds at most 256 items, far below one transaction's 4,096
-   operations.)
+6. `Grid::SequenceForLiveApply` turns the plan into single-item steps that
+   each land on cells no **other** item occupies at that moment (an item may
+   overlap its own old cells), parking blockers on free cells where items
+   block each other; the whole sequence is simulated first, and if the grid
+   is too full to find one, nothing moves. Each step is then its own
+   one-operation transaction, stopping at the first rejection; afterwards the
+   container is re-read and item count / handles / overlaps are checked and
+   logged (`post-sort check`).
+
+   **Why not one transaction:** the first version sent the whole plan as a
+   single `executeExistingItemTransaction`, trusting the SDK README's "moved
+   items are removed from a temporary occupancy model first, so a single
+   transaction can swap or chain their locations". Live, every move reported
+   committed, but items moved onto cells that another item of the same plan
+   still occupied vanished from the grid once that item moved away (the cube
+   and both tomes in the inventory, most of the personal stash). The shared
+   stash path was never exposed to this -- its layered `ApplyMoves` only
+   batches moves onto already-free cells -- except for its "cycle could not be
+   broken" fallback, which used to send such a move anyway; `ApplyMoves` now
+   refuses the whole plan instead (`SequencedMoves::unsafe`).
 
 **New item categories** `rune`, `gem`, `potion`, `tool`, `quest` come from
 misc.txt's `type` column through itemtypes.txt's Equiv chain

@@ -307,6 +307,14 @@ struct SequencedMoves {
 	// Move if the player has never opened them either. This flag is what
 	// lets that be told apart, in the log, from a real placement failing.
 	std::vector<bool> isScratchMove;
+
+	// True when some dependency cycle could not be broken (no free scratch
+	// cell), so `moves` contains a move onto cells another in-plan item still
+	// occupies at that point. A live run of the single-grid sort showed what
+	// the game does with such a move: it "commits", and the item vanishes
+	// from the grid once the occupant moves away. plugin.cpp's ApplyMoves
+	// therefore refuses to apply an unsafe sequence at all.
+	bool unsafe = false;
 };
 
 // preferredMaxTab (optional; kUnknownTab means "no preference") biases

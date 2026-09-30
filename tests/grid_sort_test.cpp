@@ -124,6 +124,47 @@ static void CheckPlanInvariants(const std::vector<ItemFacts>& items, const Grid:
 	}
 }
 
+// Replays Grid::SequenceForLiveApply step by step against a strict live
+// occupancy: every step must land on cells no OTHER item occupies at that
+// moment -- the rule whose violation made
+// items vanish in the first live run -- and every item must end on its
+// planned cell.
+static int g_seqRuns = 0, g_seqFailed = 0, g_seqParking = 0;
+static void CheckLiveSequence(const std::vector<ItemFacts>& items, const Grid::Config& cfg, const Grid::Plan& plan, const char* label) {
+	const auto seq = Grid::SequenceForLiveApply(items, plan.moves, cfg.width, cfg.height);
+	++g_seqRuns;
+	if (!seq.ok) {
+		// Refusing is safe (nothing moves), but it should only happen in a
+		// really full grid.
+		uint32_t area = 0;
+		for (const auto& it : items) area += it.w * it.h;
+		CHECK(area * 10 > cfg.width * cfg.height * 6, "%s: no safe live order although the grid is only %u%% full: %s", label,
+			area * 100 / (cfg.width * cfg.height), seq.error.c_str());
+		++g_seqFailed;
+		return;
+	}
+	g_seqParking += static_cast<int>(seq.parkingMoves);
+	std::map<uint64_t, ItemFacts> live;
+	for (const auto& it : items) live[it.handle] = it;
+	for (const auto& st : seq.steps) {
+		const ItemFacts& me = live[st.handle];
+		bool             ok = st.destX >= 0 && st.destY >= 0 && st.destX + static_cast<int>(me.w) <= static_cast<int>(cfg.width)
+		       && st.destY + static_cast<int>(me.h) <= static_cast<int>(cfg.height);
+		for (const auto& [h, it] : live) {
+			if (h == st.handle) continue; // its own old cells are fine
+			if (st.destX < it.x + static_cast<int>(it.w) && it.x < st.destX + static_cast<int>(me.w) && st.destY < it.y + static_cast<int>(it.h)
+				&& it.y < st.destY + static_cast<int>(me.h))
+				ok = false; // overlaps another item at this moment
+		}
+		CHECK(ok, "%s: live step for handle %llu lands on occupied or out-of-grid cells", label, static_cast<unsigned long long>(st.handle));
+		live[st.handle].x = st.destX;
+		live[st.handle].y = st.destY;
+	}
+	for (const auto& mv : plan.moves) {
+		CHECK(live[mv.handle].x == mv.destX && live[mv.handle].y == mv.destY, "%s: live sequence does not end at the planned cell", label);
+	}
+}
+
 static std::string ReadFile(const std::string& path) {
 	std::ifstream f(path, std::ios::binary);
 	std::stringstream ss;
@@ -282,6 +323,22 @@ static void TestScenarios() {
 		CHECK(plan.itemsFixed == 1, "one fixed item (the charm), got %u", plan.itemsFixed);
 		CheckPlanInvariants(items, cfg, plan, "inventory");
 	}
+	// The first live run: cube + two tomes on the left, 31 potions in the
+	// four right-most columns. Sent as one transaction, the tools (moved
+	// first, onto the potions' cells) vanished. The live sequence must never
+	// move onto an occupied cell.
+	{
+		Grid::Config cfg = Grid::DefaultConfig("inventory");
+		std::vector<ItemFacts> items = { Item("box", 2, 0, 0), Item("tbk", 2, 0, 2), Item("ibk", 2, 1, 2) };
+		for (int x = 6; x < 10; ++x)
+			for (int y = 0; y < 8; ++y)
+				if (!(x == 6 && y == 0)) items.push_back(Item(x < 8 ? "mp5" : "hp5", 2, x, y));
+		auto plan = Grid::PlanSort(items, cfg);
+		CHECK(plan.status == Grid::Status::Ok && plan.moves.size() == 34, "live-report inventory plan");
+		CheckLiveSequence(items, cfg, plan, "live-report inventory");
+		auto seq = Grid::SequenceForLiveApply(items, plan.moves, cfg.width, cfg.height);
+		CHECK(seq.ok, "live-report inventory must have a safe order: %s", seq.error.c_str());
+	}
 	// Personal stash: runes go to the right-most zone, El on top.
 	{
 		Grid::Config cfg = Grid::DefaultConfig("personal_stash");
@@ -381,6 +438,7 @@ static void TestRandomized() {
 			}
 			CHECK(plan.status == Grid::Status::Ok, "%s round %d: %s", section, round, plan.error.c_str());
 			CheckPlanInvariants(items, cfg, plan, section);
+			CheckLiveSequence(items, cfg, plan, section);
 			// Sorting an already-sorted grid must be a no-op.
 			std::vector<ItemFacts> after = items;
 			for (auto& it : after)
@@ -391,6 +449,8 @@ static void TestRandomized() {
 		}
 	}
 	std::printf("randomized: %d plans, %d NoRoom (expected for dense random grids)\n", plans, noRoom);
+	std::printf("live sequences: %d built, %d without a safe order, %d parking moves in total\n", g_seqRuns, g_seqFailed, g_seqParking);
+
 }
 
 int main(int argc, char** argv) {

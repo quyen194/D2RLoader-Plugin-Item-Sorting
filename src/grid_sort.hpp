@@ -105,4 +105,35 @@ struct Plan {
 
 Plan PlanSort(const std::vector<ItemFacts>& items, const Config& cfg);
 
+// Turns a plan's moves (final cells only) into a LIVE-SAFE sequence: every
+// step moves one item onto cells that no OTHER item occupies at that moment
+// (its own old cells are fine -- the game lifts it out first, as when a
+// player drops an item one cell over), exactly like moving items by hand.
+// Where items block each other (swaps, chains) the blockers are first
+// parked on free cells and moved on later, so a handle can appear more than
+// once.
+//
+// Why: a live run sent a whole grid plan as one ExistingItemTransaction,
+// relying on the SDK README's "moved items are removed from a temporary
+// occupancy model first, so a single transaction can swap or chain their
+// locations". Every move reported committed, yet items that were moved onto
+// cells another item of the same plan still occupied vanished from the grid
+// once that other item moved away (inventory: the cube and both tomes went
+// first onto the potions' cells and disappeared; the potions, moved after,
+// were fine). So the plugin now never lets the game see a move onto an
+// occupied cell, and applies the steps one transaction each.
+//
+// `items` must be every item of the container (fixed ones included), at
+// their current cells. ok = false (with `error`) if no safe order exists --
+// only when the grid is so full that a blocked item fits nowhere, even
+// temporarily. The whole sequence is simulated before anything is applied.
+struct Sequence {
+	bool                     ok = false;
+	std::string              error;
+	std::vector<PlannedMove> steps;
+	uint32_t                 parkingMoves = 0; // temporary moves added to break blocks
+};
+
+Sequence SequenceForLiveApply(const std::vector<ItemFacts>& items, const std::vector<PlannedMove>& moves, uint32_t width, uint32_t height);
+
 }

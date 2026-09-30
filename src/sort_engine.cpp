@@ -1319,6 +1319,7 @@ SequencedMoves SequenceMovesForLiveApply(
 					result.layerSizes.push_back(1);
 					result.moves.push_back(n.mv);
 					result.isScratchMove.push_back(false);
+					result.unsafe = true;
 					n.done = true;
 					++processed;
 					continue;

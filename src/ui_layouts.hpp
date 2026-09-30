@@ -78,6 +78,7 @@ enum class OutcomeMessage : uint32_t {
 	GridSortConfigError,
 	GridSortNoRoom,
 	GridSortRejected,
+	GridSortTooFull,
 	Count, // not a real message; array size marker
 };
 
@@ -102,6 +103,7 @@ inline const char* OutcomeMessageWidgetName(OutcomeMessage msg) {
 		case OutcomeMessage::GridSortConfigError: return "MsgGridSortConfigError";
 		case OutcomeMessage::GridSortNoRoom: return "MsgGridSortNoRoom";
 		case OutcomeMessage::GridSortRejected: return "MsgGridSortRejected";
+		case OutcomeMessage::GridSortTooFull: return "MsgGridSortTooFull";
 		case OutcomeMessage::InternalError:
 		case OutcomeMessage::Count: return "MsgInternalError";
 	}

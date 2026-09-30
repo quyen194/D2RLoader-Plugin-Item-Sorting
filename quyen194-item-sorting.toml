@@ -381,9 +381,11 @@ sort_keys = ["quality", "reqLevel", "name"]
 #   on_overflow      -- "compact" | "abort".
 #                       Moving items into a new arrangement can fail to fit
 #                       even when they all fit before (mixed item sizes
-#                       leave holes). The whole plan is always computed and
-#                       checked BEFORE any item moves, so there is never a
-#                       half-sorted grid.
+#                       leave holes). The whole plan -- including the order
+#                       the items are moved in, one at a time, each onto
+#                       free cells -- is computed and checked BEFORE any item
+#                       moves. If the grid is too full to rearrange safely,
+#                       nothing moves (toast + log).
 #                       "compact": if the plan doesn't fit, retry once with
 #                         category_break = "none"; if that still doesn't
 #                         fit, abort.
