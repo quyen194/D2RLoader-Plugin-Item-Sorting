@@ -1090,12 +1090,15 @@ dark strip left of the native "Page N / 200" navigation. That container is only
 shown on the Shared tab, so the buttons hide on the other stash tabs by
 themselves. Each button fires `PanelManager:TogglePanel:quyen194-item-sorting/Action*`.
 
-The button art is this plugin's own: 72x72 icon sprites (4 frames: normal,
-hovered, pressed, disabled -- the native page-arrow order) plus half-size
-`.lowend` copies, in the companion MPQ at
+The button art is this plugin's own. The source artwork lives in
+`assets/stash_buttons/{autosort,addpage,removepage}.png`;
+`tools/gen_stash_button_sprites.py [--size 88] [--png]` (Pillow) crops it,
+builds 88x88 native `SpA1` sprites with 4 frames (normal, hovered, pressed,
+disabled -- the native page-arrow order; only "normal" is artwork, the rest
+are derived) plus half-size `.lowend` copies, and writes them into the
+companion MPQ at
 `data/hd/global/ui/d2rloader/quyen194-item-sorting/stash_btn_*.sprite`.
-`tools/gen_stash_button_sprites.py <out dir> [--png]` regenerates them
-(Pillow; writes native `SpA1` sprites, `--png` also writes previews).
+Keep `--size` in sync with `BUTTON_SIZE` in `tools/patch_mod_stash_layout.py`.
 
 ```text
 python tools/patch_mod_stash_layout.py <game>/mods/Reimagined/Reimagined.mpq            # patch / upgrade (no-op if current)

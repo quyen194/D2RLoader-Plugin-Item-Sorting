@@ -42,7 +42,7 @@ constexpr PluginInfo kPluginInfo {
 	.infoSize    = PluginInfoSize,
 	.abiVersion  = D2RL_PLUGIN_ABI_VERSION,
 	.id          = Quyen194ItemSorting::UiLayouts::kPluginId,
-	.name        = "Quyen194 Item Sorting",
+	.name        = "Item Sorting",
 	.version     = "0.1.0",
 	.author      = "quyen19492",
 	.description = "Auto-sorts the shared stash and rotates blank tabs.",

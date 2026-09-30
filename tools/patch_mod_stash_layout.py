@@ -40,7 +40,7 @@ import shutil
 import sys
 from pathlib import Path
 
-STRIP_VERSION = 3
+STRIP_VERSION = 4
 MARKER_PREFIX = "Quyen194ItemSortingStashButtons_v"
 # Strips written before the plugin was renamed from remote-stash-sorting to
 # quyen194-item-sorting (strip v1/v2). Still recognised so they get upgraded
@@ -54,11 +54,12 @@ LAYOUT_FILES = {
     "controller": Path("data/global/ui/layouts/controller/bankexpansionlayouthd.json"),
 }
 
-# Three 72x72 icon buttons on the dark recessed strip left of the native page
+# Three 88x88 icon buttons on the dark recessed strip left of the native page
 # navigation (StashNavigation sits at x=668..1088, y=1506..1599; the 16x13
 # grid starts at x=90 and ends above y=1506), vertically centred on it.
 # Coordinates are BankExpansionLayout-local, same space as StashNavigation.
-# Sprites ship in the plugin's companion MPQ (tools/gen_stash_button_sprites.py);
+# Sprites ship in the plugin's companion MPQ (tools/gen_stash_button_sprites.py,
+# whose --size must match BUTTON_SIZE);
 # frame order matches the native page arrows: normal, hovered, pressed, disabled.
 SPRITE_DIR = "d2rloader/quyen194-item-sorting"
 BUTTONS = [
@@ -67,8 +68,8 @@ BUTTONS = [
     ("QisAddBlankPageButton", "stash_btn_addpage", "AddBlankPageTooltip", "ActionAddBlankPage"),
     ("QisRemovePageButton", "stash_btn_removepage", "RemoveCurrentPageTooltip", "ActionRemoveCurrentPage"),
 ]
-BUTTON_SIZE, BUTTON_GAP = 72, 10
-STRIP_X, STRIP_Y = 110, 1516
+BUTTON_SIZE, BUTTON_GAP = 88, 8
+STRIP_X, STRIP_Y = 110, 1508
 STRIP_RECT = (STRIP_X, STRIP_Y, len(BUTTONS) * BUTTON_SIZE + (len(BUTTONS) - 1) * BUTTON_GAP, BUTTON_SIZE)
 
 
