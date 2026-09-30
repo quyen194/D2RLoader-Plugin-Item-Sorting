@@ -1,14 +1,29 @@
 #!/usr/bin/env python3
-"""Add the Quyen194 Item Sorting buttons to a mod's shared-stash dialog.
+"""Add the Quyen194 Item Sorting buttons to a mod's stash and cube layouts.
 
 The D2RLoader PluginSDK can only attach a plugin child layout to
 StockPanel::PlayerInventory, and a plugin's companion MPQ may not override
 native layouts. The active mod's own MPQ *can* (resource order: active mod ->
-plugin -> base game), so this script inserts a small button strip into the
-mod's data/global/ui/layouts/bankexpansionlayouthd.json, inside
-BankExpansionLayout > basicstash_container > SharedStashTabContainer. That
-container is only shown while the Shared tab is selected, so the buttons hide
-themselves on the Personal / Gems / Materials / Runes tabs.
+plugin -> base game), so this script inserts small button strips into the
+mod's own layout files:
+
+  data/global/ui/layouts/bankexpansionlayouthd.json
+    - SharedStashTabContainer  Auto Sort / Add Page / Remove Page. That
+                               container is only shown while the Shared tab
+                               is selected, so these hide on the other tabs.
+    - basicstash_container     Sort Personal Stash. This container is shown
+                               on both the Personal and the Shared tab (they
+                               share one grid widget), so the button sits
+                               right of the shared-stash strip and always
+                               sorts the PERSONAL stash.
+    - advancedstash_horadriccube
+                               Sort Cube, on the stash dialog's cube tab
+                               (Reimagined). Skipped if the mod has no such
+                               container.
+  data/global/ui/layouts/horadriccubelayouthd.json
+    - HoradricCubeLayout       Sort Cube, in the normal Horadric Cube panel.
+
+(The inventory's Sort button needs no patch: the plugin adds it itself.)
 
 The buttons are icon sprites shipped in the plugin's companion MPQ
 (d2rloader/quyen194-item-sorting/stash_btn_*.sprite). Each button fires
@@ -18,17 +33,18 @@ turns into the matching action (see the g_action*Panel comment in plugin.cpp).
 Usage:
     python patch_mod_stash_layout.py <mod.mpq folder>             # patch (or upgrade)
     python patch_mod_stash_layout.py <mod.mpq folder> --check     # report only
-    python patch_mod_stash_layout.py <mod.mpq folder> --remove    # take the strip out again
-    python patch_mod_stash_layout.py <mod.mpq folder> --controller  # also patch controller/ layout
+    python patch_mod_stash_layout.py <mod.mpq folder> --remove    # take every strip out again
+    python patch_mod_stash_layout.py <mod.mpq folder> --controller  # also patch the controller/ layouts
 
 Before any file is written it is copied to <file>.bak, or .bak1, .bak2, ... --
 the first name that does not exist yet. Existing backups are never overwritten.
 
 Re-run it after every mod update: the mod's installer replaces the layout
-file, which drops the strip. Running it on an already-patched file is a no-op.
+files, which drops the strips. Running it on an already-patched file is a
+no-op.
 
-Exit codes: 0 ok / already patched, 1 error, 2 (--check only) not patched or
-patched with an older strip version.
+Exit codes: 0 ok / already patched, 1 error, 2 (--check only) something not
+patched or patched with an older strip version.
 """
 
 from __future__ import annotations
@@ -38,54 +54,135 @@ import json
 import re
 import shutil
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
-STRIP_VERSION = 4
-MARKER_PREFIX = "Quyen194ItemSortingStashButtons_v"
-# Strips written before the plugin was renamed from remote-stash-sorting to
-# quyen194-item-sorting (strip v1/v2). Still recognised so they get upgraded
-# or removed instead of being left behind next to a new strip.
-LEGACY_MARKER_PREFIXES = ("Remote" + "StashSortingStashButtons_v",)
-ALL_MARKER_PREFIXES = (MARKER_PREFIX,) + LEGACY_MARKER_PREFIXES
-MARKER = f"{MARKER_PREFIX}{STRIP_VERSION}"
+# Sprites ship in the plugin's companion MPQ (tools/gen_stash_button_sprites.py,
+# whose --size must match BUTTON_SIZE); frame order matches the native page
+# arrows: normal, hovered, pressed, disabled.
+SPRITE_DIR = "d2rloader/quyen194-item-sorting"
+BUTTON_SIZE, BUTTON_GAP = 88, 8
+
+
+@dataclass
+class Strip:
+    """One row of icon buttons inserted into one container of one layout file."""
+
+    key: str                      # short id for messages
+    marker_prefix: str            # strip widget name = marker_prefix + version
+    version: int
+    container: str                # name of the widget whose children get the strip
+    position: str                 # "first" or "last" child of that container
+    x: int                        # strip rect, in the container's coordinate space
+    y: int
+    buttons: list                 # (widget name, sprite, tooltip key, action panel)
+    legacy_prefixes: tuple = ()   # older marker names still recognised for upgrade/removal
+    required: bool = True         # False: skip quietly if the container is missing
+    must_keep: tuple = field(default_factory=tuple)  # native widgets that must survive the edit
+
+    @property
+    def marker(self) -> str:
+        return f"{self.marker_prefix}{self.version}"
+
+    @property
+    def all_prefixes(self) -> tuple:
+        return (self.marker_prefix,) + self.legacy_prefixes
+
+    @property
+    def rect(self):
+        n = len(self.buttons)
+        return (self.x, self.y, n * BUTTON_SIZE + (n - 1) * BUTTON_GAP, BUTTON_SIZE)
+
+
+# Shared-stash strip: three 88x88 icon buttons on the dark recessed strip left
+# of the native page navigation (StashNavigation sits at x=668..1088,
+# y=1506..1599; the 16x13 grid starts at x=90 and ends above y=1506),
+# vertically centred on it. Coordinates are BankExpansionLayout-local, same
+# space as StashNavigation. Strips written before the plugin was renamed from
+# remote-stash-sorting to quyen194-item-sorting (strip v1/v2) are still
+# recognised so they get upgraded or removed instead of being left behind.
+SHARED_STRIP = Strip(
+    key="shared-stash",
+    marker_prefix="Quyen194ItemSortingStashButtons_v",
+    version=4,
+    legacy_prefixes=("Remote" + "StashSortingStashButtons_v",),
+    container="SharedStashTabContainer",
+    position="first",
+    x=110,
+    y=1508,
+    buttons=[
+        ("QisAutoSortButton", "stash_btn_autosort", "AutoSortTooltip", "ActionAutoSort"),
+        ("QisAddBlankPageButton", "stash_btn_addpage", "AddBlankPageTooltip", "ActionAddBlankPage"),
+        ("QisRemovePageButton", "stash_btn_removepage", "RemoveCurrentPageTooltip", "ActionRemoveCurrentPage"),
+    ],
+    must_keep=("StashNavigation",),
+)
+
+# Personal-stash Sort: same row as the shared strip, one slot to its right
+# (x = 110 + 3 * (88 + 8) = 398), still left of StashNavigation (x=668).
+PERSONAL_STRIP = Strip(
+    key="personal-stash",
+    marker_prefix="Quyen194ItemSortingPersonalButtons_v",
+    version=1,
+    container="basicstash_container",
+    position="last",
+    x=398,
+    y=1508,
+    buttons=[("QisSortPersonalStashButton", "stash_btn_autosort", "SortPersonalStashTooltip", "ActionSortPersonalStash")],
+    must_keep=("grid",),
+)
+
+# Cube tab of the stash dialog (Reimagined): under the 12x8 cube grid (x=284,
+# y=708..1492), left of the native Transmute button (x=810, y=1564).
+CUBE_TAB_STRIP = Strip(
+    key="stash-cube-tab",
+    marker_prefix="Quyen194ItemSortingCubeTabButtons_v",
+    version=1,
+    container="advancedstash_horadriccube",
+    position="last",
+    x=284,
+    y=1540,
+    buttons=[("QisSortCubeTabButton", "stash_btn_autosort", "SortCubeTooltip", "ActionSortCube")],
+    required=False,
+    must_keep=("horadriccube_grid",),
+)
+
+# Normal Horadric Cube panel: under the grid (x=120, y=232..1016 for 12x8),
+# on the same row as the native Transmute button (x=1174, y=1046).
+CUBE_PANEL_STRIP = Strip(
+    key="cube-panel",
+    marker_prefix="Quyen194ItemSortingCubeButtons_v",
+    version=1,
+    container="HoradricCubeLayout",
+    position="last",
+    x=120,
+    y=1046,
+    buttons=[("QisSortCubeButton", "stash_btn_autosort", "SortCubeTooltip", "ActionSortCube")],
+    must_keep=("grid",),
+)
 
 LAYOUT_FILES = {
-    "mouse": Path("data/global/ui/layouts/bankexpansionlayouthd.json"),
-    "controller": Path("data/global/ui/layouts/controller/bankexpansionlayouthd.json"),
+    # key: (relative path, strips, controller variant?)
+    "bank": (Path("data/global/ui/layouts/bankexpansionlayouthd.json"), [SHARED_STRIP, PERSONAL_STRIP, CUBE_TAB_STRIP], False),
+    "cube": (Path("data/global/ui/layouts/horadriccubelayouthd.json"), [CUBE_PANEL_STRIP], False),
+    "bank-controller": (Path("data/global/ui/layouts/controller/bankexpansionlayouthd.json"), [SHARED_STRIP, PERSONAL_STRIP, CUBE_TAB_STRIP], True),
+    "cube-controller": (Path("data/global/ui/layouts/controller/horadriccubelayouthd.json"), [CUBE_PANEL_STRIP], True),
 }
 
-# Three 88x88 icon buttons on the dark recessed strip left of the native page
-# navigation (StashNavigation sits at x=668..1088, y=1506..1599; the 16x13
-# grid starts at x=90 and ends above y=1506), vertically centred on it.
-# Coordinates are BankExpansionLayout-local, same space as StashNavigation.
-# Sprites ship in the plugin's companion MPQ (tools/gen_stash_button_sprites.py,
-# whose --size must match BUTTON_SIZE);
-# frame order matches the native page arrows: normal, hovered, pressed, disabled.
-SPRITE_DIR = "d2rloader/quyen194-item-sorting"
-BUTTONS = [
-    # (widget name, sprite, tooltip key, action panel)
-    ("QisAutoSortButton", "stash_btn_autosort", "AutoSortTooltip", "ActionAutoSort"),
-    ("QisAddBlankPageButton", "stash_btn_addpage", "AddBlankPageTooltip", "ActionAddBlankPage"),
-    ("QisRemovePageButton", "stash_btn_removepage", "RemoveCurrentPageTooltip", "ActionRemoveCurrentPage"),
-]
-BUTTON_SIZE, BUTTON_GAP = 88, 8
-STRIP_X, STRIP_Y = 110, 1508
-STRIP_RECT = (STRIP_X, STRIP_Y, len(BUTTONS) * BUTTON_SIZE + (len(BUTTONS) - 1) * BUTTON_GAP, BUTTON_SIZE)
 
-
-def build_block(indent: str, nl: str) -> str:
+def build_block(strip: Strip, indent: str, nl: str) -> str:
     """The strip as JSON text, indented to sit inside a children array."""
     i1, i2, i3, i4 = indent + "    ", indent + "        ", indent + "            ", indent + "                "
-    x, y, w, h = STRIP_RECT
+    x, y, w, h = strip.rect
     lines = [
         f"{indent}{{",
-        f'{i1}"type": "Widget", "name": "{MARKER}",',
+        f'{i1}"type": "Widget", "name": "{strip.marker}",',
         f'{i1}"fields": {{',
         f'{i2}"rect": {{ "x": {x}, "y": {y}, "width": {w}, "height": {h} }}',
         f"{i1}}},",
         f'{i1}"children": [',
     ]
-    for idx, (name, sprite, tooltip, action) in enumerate(BUTTONS):
+    for idx, (name, sprite, tooltip, action) in enumerate(strip.buttons):
         bx = idx * (BUTTON_SIZE + BUTTON_GAP)
         lines += [
             f"{i2}{{",
@@ -100,7 +197,7 @@ def build_block(indent: str, nl: str) -> str:
             f'{i4}"tooltipString": "@quyen194-item-sorting:{tooltip}",',
             f'{i4}"onClickMessage": "PanelManager:TogglePanel:quyen194-item-sorting/{action}"',
             f"{i3}}}",
-            f"{i2}}}" + ("," if idx < len(BUTTONS) - 1 else ""),
+            f"{i2}}}" + ("," if idx < len(strip.buttons) - 1 else ""),
         ]
     lines += [f"{i1}]", f"{indent}}}"]
     return nl.join(lines)
@@ -161,8 +258,8 @@ def enclosing_object_start(text: str, pos: int) -> int:
     raise ValueError("no enclosing object")
 
 
-def find_existing_strip(text: str):
-    alternatives = "|".join(re.escape(p) for p in ALL_MARKER_PREFIXES)
+def find_existing_strip(text: str, strip: Strip):
+    alternatives = "|".join(re.escape(p) for p in strip.all_prefixes)
     m = re.search(r'"name"\s*:\s*"(?:' + alternatives + r')(\d+)"', text)
     if not m:
         return None
@@ -171,17 +268,24 @@ def find_existing_strip(text: str):
     return start, end, int(m.group(1))
 
 
-def remove_strip(text: str) -> str:
-    found = find_existing_strip(text)
+def remove_strip(text: str, strip: Strip) -> str:
+    found = find_existing_strip(text, strip)
     if not found:
         return text
     start, end, _ = found
-    # Drop the block, the comma that followed it (it's always inserted first
-    # in the array, followed by ","), and the line it sat on.
     after = end + 1
     m = re.match(r"\s*,", text[after:])
     if m:
+        # Inserted as the first child (or anywhere but last): drop the block
+        # and the comma that follows it.
         after += m.end()
+    else:
+        # Inserted as the last child: drop the comma that precedes it.
+        k = start - 1
+        while k >= 0 and text[k] in " \t\r\n":
+            k -= 1
+        if k >= 0 and text[k] == ",":
+            start = k
     line_start = text.rfind("\n", 0, start) + 1
     if text[line_start:start].strip() == "":
         start = line_start
@@ -192,29 +296,77 @@ def remove_strip(text: str) -> str:
     return text[:start] + text[after:]
 
 
-def insert_strip(text: str, nl: str) -> str:
-    m = re.search(r'"name"\s*:\s*"SharedStashTabContainer"', text)
+def container_children(text: str, container: str):
+    """(index of the children '[', index of its ']', object start) for the named widget, or None."""
+    m = re.search(r'"name"\s*:\s*"' + re.escape(container) + '"', text)
     if not m:
-        raise ValueError('widget "SharedStashTabContainer" not found -- the mod layout changed; the script needs updating')
+        return None
     obj_start = enclosing_object_start(text, m.start())
     obj_end = matching_close(text, obj_start)
     ch = re.compile(r'"children"\s*:\s*\[').search(text, m.end(), obj_end)
     if not ch:
-        raise ValueError('"SharedStashTabContainer" has no children array')
+        raise ValueError(f'"{container}" has no children array')
     bracket = ch.end() - 1
+    return bracket, matching_close(text, bracket), obj_start
+
+
+def insert_strip(text: str, strip: Strip, nl: str) -> str:
+    found = container_children(text, strip.container)
+    if found is None:
+        raise ValueError(f'widget "{strip.container}" not found -- the mod layout changed; the script needs updating')
+    bracket, close, obj_start = found
     # indent = indentation of the first existing child, else container + 4
-    after = text[bracket + 1:]
-    im = re.match(r"\s*?\r?\n([ \t]*)\S", after)
+    im = re.match(r"\s*?\r?\n([ \t]*)\S", text[bracket + 1:])
     if im:
         indent = im.group(1)
     else:
         line_start = text.rfind("\n", 0, obj_start) + 1
         indent = text[line_start:obj_start] + "    "
-    block = build_block(indent, nl)
-    return text[: bracket + 1] + nl + block + "," + text[bracket + 1:]
+    block = build_block(strip, indent, nl)
+    if strip.position == "first":
+        return text[: bracket + 1] + nl + block + "," + text[bracket + 1:]
+    # last: after the final existing child
+    k = close - 1
+    while k > bracket and text[k] in " \t\r\n":
+        k -= 1
+    if k == bracket:  # empty children array
+        return text[: bracket + 1] + nl + block + text[bracket + 1:]
+    return text[: k + 1] + "," + nl + block + text[k + 1:]
 
 
 # --- validation -------------------------------------------------------------
+
+def lenient_json_loads(text: str):
+    """json.loads that also accepts what D2R's own layout parser tolerates and
+    some shipped layouts use: trailing commas and // or /* */ comments."""
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            j = skip_string(text, i)
+            out.append(text[i:j])
+            i = j
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        if c == ",":
+            k = i + 1
+            while k < n and text[k] in " \t\r\n":
+                k += 1
+            if k < n and text[k] in "]}":
+                i += 1
+                continue
+        out.append(c)
+        i += 1
+    return json.loads("".join(out))
+
 
 def find_widget(node, name):
     if isinstance(node, dict):
@@ -227,20 +379,21 @@ def find_widget(node, name):
     return None
 
 
-def validate(text: str, expect_patched: bool) -> None:
-    doc = json.loads(text)
-    container = find_widget(doc, "SharedStashTabContainer")
+def validate(text: str, strip: Strip, expect_patched: bool) -> None:
+    doc = lenient_json_loads(text)
+    container = find_widget(doc, strip.container)
     if container is None:
-        raise ValueError("validation: SharedStashTabContainer missing after edit")
+        raise ValueError(f"validation: {strip.container} missing after edit")
     names = [c.get("name") for c in container.get("children", [])]
-    if expect_patched and MARKER not in names:
-        raise ValueError("validation: strip did not land inside SharedStashTabContainer")
-    if any(str(n).startswith(ALL_MARKER_PREFIXES) and n != MARKER for n in names):
-        raise ValueError("validation: an older strip is still present")
-    if not expect_patched and any(str(n).startswith(ALL_MARKER_PREFIXES) for n in names):
-        raise ValueError("validation: strip still present after removal")
-    if find_widget(doc, "StashNavigation") is None:
-        raise ValueError("validation: native StashNavigation disappeared")
+    if expect_patched and strip.marker not in names:
+        raise ValueError(f"validation: {strip.key} strip did not land inside {strip.container}")
+    if any(str(n).startswith(strip.all_prefixes) and n != strip.marker for n in names):
+        raise ValueError(f"validation: an older {strip.key} strip is still present")
+    if not expect_patched and any(str(n).startswith(strip.all_prefixes) for n in names):
+        raise ValueError(f"validation: {strip.key} strip still present after removal")
+    for native in strip.must_keep:
+        if find_widget(doc, native) is None:
+            raise ValueError(f"validation: native {native} disappeared")
 
 
 # --- file handling ----------------------------------------------------------
@@ -272,41 +425,59 @@ def write_layout(path: Path, text: str, bom: bool) -> Path:
     return backup
 
 
-def status_of(text: str) -> str:
-    found = find_existing_strip(text)
+def status_of(text: str, strip: Strip) -> str:
+    if container_children(text, strip.container) is None:
+        return "no container"
+    found = find_existing_strip(text, strip)
     if not found:
         return "not patched"
-    return "patched" if found[2] == STRIP_VERSION else f"patched with older strip v{found[2]}"
+    return "patched" if found[2] == strip.version else f"patched with older strip v{found[2]}"
 
 
-def process(path: Path, mode: str) -> int:
+def process(path: Path, strips: list, mode: str) -> int:
     text, bom, nl = read_layout(path)
-    status = status_of(text)
-    print(f"{path}: {status}")
+    original = text
+    worst = 0
+    changes = []
+    print(f"{path}:")
+    for strip in strips:
+        status = status_of(text, strip)
+        print(f"  {strip.key} ({strip.container}): {status}")
+        if status == "no container":
+            if strip.required and mode != "remove":
+                print(f"    ERROR: widget \"{strip.container}\" not found -- the mod layout changed; the script needs updating", file=sys.stderr)
+                worst = max(worst, 1)
+            continue
 
-    if mode == "check":
-        return 0 if status == "patched" else 2
+        if mode == "check":
+            if status != "patched":
+                worst = max(worst, 2)
+            continue
 
-    if mode == "remove":
-        if status == "not patched":
-            print("  nothing to remove.")
-            return 0
-        new = remove_strip(text)
-        validate(new, expect_patched=False)
-        backup = write_layout(path, new, bom)
-        print(f"  removed. backup: {backup.name}")
-        return 0
+        if mode == "remove":
+            if status == "not patched":
+                continue
+            text = remove_strip(text, strip)
+            validate(text, strip, expect_patched=False)
+            changes.append(f"{strip.key} removed")
+            continue
 
-    # patch / upgrade
-    if status == "patched":
+        # patch / upgrade
+        if status == "patched":
+            continue
+        base = remove_strip(text, strip) if status != "not patched" else text
+        text = insert_strip(base, strip, nl)
+        validate(text, strip, expect_patched=True)
+        changes.append(f"{strip.key} {'upgraded' if status != 'not patched' else 'patched'}")
+
+    if text != original:
+        backup = write_layout(path, text, bom)
+        print(f"  {', '.join(changes)}. backup: {backup.name}")
+    elif mode == "patch" and worst == 0:
         print("  already patched -- no change.")
-        return 0
-    base = remove_strip(text) if status != "not patched" else text
-    new = insert_strip(base, nl)
-    validate(new, expect_patched=True)
-    backup = write_layout(path, new, bom)
-    print(f"  {'upgraded' if status != 'not patched' else 'patched'}. backup: {backup.name}")
-    return 0
+    elif mode == "remove":
+        print("  nothing to remove.")
+    return worst
 
 
 def main() -> int:
@@ -314,22 +485,23 @@ def main() -> int:
     ap.add_argument("mod_mpq", type=Path, help="the mod's .mpq folder, e.g. ...\\mods\\Reimagined\\Reimagined.mpq")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--check", action="store_true", help="only report whether each layout is patched")
-    g.add_argument("--remove", action="store_true", help="remove the button strip")
-    ap.add_argument("--controller", action="store_true", help="also process controller/bankexpansionlayouthd.json")
+    g.add_argument("--remove", action="store_true", help="remove every button strip")
+    ap.add_argument("--controller", action="store_true", help="also process the controller/ layouts")
     args = ap.parse_args()
 
     mode = "check" if args.check else "remove" if args.remove else "patch"
-    targets = ["mouse"] + (["controller"] if args.controller else [])
 
     worst = 0
-    for key in targets:
-        path = args.mod_mpq / LAYOUT_FILES[key]
+    for key, (rel, strips, is_controller) in LAYOUT_FILES.items():
+        if is_controller and not args.controller:
+            continue
+        path = args.mod_mpq / rel
         if not path.is_file():
             print(f"{path}: not found", file=sys.stderr)
             worst = max(worst, 1)
             continue
         try:
-            worst = max(worst, process(path, mode))
+            worst = max(worst, process(path, strips, mode))
         except (ValueError, json.JSONDecodeError) as exc:
             print(f"{path}: ERROR: {exc} (file left unchanged)", file=sys.stderr)
             worst = max(worst, 1)

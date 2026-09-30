@@ -104,7 +104,9 @@ height = 13
 #                            rareRingAmu, magicRingAmu, uniqueCharm,
 #                            magicCharm, uniqueJewel, rareMagicJewel,
 #                            rareGear, magicGear, superiorGear, normalGear,
-#                            unclassified.
+#                            unclassified -- or one of the misc categories
+#                            rune, gem, potion, tool, quest (see the
+#                            single-grid sections at the end of this file).
 #
 #   min_tabs              -- reserved tabs before this category starts
 #                            borrowing more from the rest of the stash;
@@ -275,5 +277,317 @@ add_empty_page_when = "never"
 gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "knif", "blun", "scep", "wand", "staf", "orb", "spea", "pole", "jave", "bow", "bowq", "xbow", "xboq", "h2h", "weap"]
 sort_keys = ["quality", "reqLevel", "name"]
 
-# This plugin only rearranges the local player's own shared stash, so its
-# settings do not affect other players and are not listed under [d2rl].
+# ═══════════════════════════════════════════════════════════════════════════
+#  SINGLE-GRID SORTING: Personal Stash, Inventory, Horadric Cube
+# ═══════════════════════════════════════════════════════════════════════════
+# Everything above this line is the shared stash. The three sections below
+# each sort one other container, with its own Sort button:
+#   personal_stash -- button on the stash dialog's Personal tab (added to the
+#                     mod's stash layout by tools/patch_mod_stash_layout.py;
+#                     it also shows on the Shared tab, right of the shared-
+#                     stash buttons, and always sorts the PERSONAL stash)
+#   inventory      -- button on the inventory panel, bottom-left, next to
+#                     the gold button (added by the plugin itself)
+#   cube           -- button in the Horadric Cube panel and on the stash
+#                     dialog's cube tab (added by patch_mod_stash_layout.py)
+#
+# ── How single-grid sorting differs from shared-stash sorting ──────────────
+# The shared stash has many tabs, so each category gets its own tab(s)
+# (min_tabs, add_empty_page_when). The personal stash, inventory and cube are
+# each ONE grid with no spare tabs, so here a category gets an AREA of that
+# grid instead. That's why min_tabs / add_empty_page_when do not exist below
+# and zone / anchor / fill_direction / category_break exist instead.
+#
+# ── The three sections share one format ────────────────────────────────────
+#   [quyen194-item-sorting.personal_stash]   + [[...personal_stash.layout]]
+#   [quyen194-item-sorting.inventory]        + [[...inventory.layout]]
+#   [quyen194-item-sorting.cube]             + [[...cube.layout]]
+# Every key below is accepted by all three sections. The only differences
+# are the shipped default values. A key you leave out takes its shipped
+# default; a section you leave out entirely uses the shipped defaults too.
+# A key with an invalid value makes that container's Sort refuse to run
+# (toast + the exact problem in the plugin log) -- it never guesses.
+#
+# ── Section keys ───────────────────────────────────────────────────────────
+#
+#   enabled          -- true | false. false makes that container's Sort
+#                       button show a "disabled" toast instead of sorting.
+#
+#   grid_width       -- integer 1-16. Number of columns / rows of this
+#   grid_height         container's grid. The SDK cannot query these, so
+#                       they must match your mod. Shipped values are the
+#                       Reimagined mod's sizes:
+#                         personal stash 16 x 13, inventory 10 x 8,
+#                         Horadric Cube 12 x 8.
+#                       Vanilla D2R sizes, for reference:
+#                         personal stash 10 x 10, inventory 10 x 4,
+#                         Horadric Cube 3 x 4.
+#                       Items found outside this grid (x + w > width or
+#                       y + h > height) are left exactly where they are and
+#                       listed in the plugin log; the rest is sorted inside
+#                       width x height. If the log reports such items, your
+#                       values are too small.
+#
+#   fill_direction   -- "columns" | "rows".
+#                       "columns": fill one column completely (in the
+#                         vertical direction the anchor points to), then
+#                         move to the next column. Best for tall items
+#                         (2x3 armor, 2x4 weapons): they stack neatly
+#                         instead of leaving holes.
+#                       "rows": fill one row completely, then move to the
+#                         next row. Best for small 1x1 items (runes, gems).
+#
+#   category_break   -- "none" | "band".
+#                       "none": the next layout entry continues right where
+#                         the previous one stopped. Tightest packing.
+#                       "band": each layout entry starts in a fresh column
+#                         ("columns") or fresh row ("rows"), so categories
+#                         never share a column/row. Easier to read, costs
+#                         some space. Only applies between entries that
+#                         share the same anchor and have no zone.
+#
+#   on_overflow      -- "compact" | "abort".
+#                       Moving items into a new arrangement can fail to fit
+#                       even when they all fit before (mixed item sizes
+#                       leave holes). The whole plan is always computed and
+#                       checked BEFORE any item moves, so there is never a
+#                       half-sorted grid.
+#                       "compact": if the plan doesn't fit, retry once with
+#                         category_break = "none"; if that still doesn't
+#                         fit, abort.
+#                       "abort": give up at once.
+#                       Abort = toast + log line, no item moved.
+#
+#   locked_cells     -- list of rectangles { x, y, w, h } the plugin never
+#                       touches. x and y are 0-based (0,0 = top-left cell);
+#                       w and h are sizes in cells, >= 1. The rectangle must
+#                       fit inside the grid: x + w <= grid_width,
+#                       y + h <= grid_height. Any item overlapping a locked
+#                       rectangle, even by one cell, stays exactly where it
+#                       is, and no item is ever moved into a locked cell.
+#                       [] = nothing locked. Example, lock the two
+#                       right-most columns of a 16-wide grid:
+#                         locked_cells = [ { x = 14, y = 0, w = 2, h = 13 } ]
+#
+#   keep_in_place    -- list of mode_ids (see the full list below). Items of
+#                       these modes stay exactly where they are, wherever
+#                       they sit in the grid; other items are arranged
+#                       around them. A mode_id listed here must NOT also
+#                       appear in this section's layout. Listing
+#                       "unclassified" here keeps every item that no layout
+#                       entry claims in place. [] = move everything.
+#
+# ── Layout entry keys ([[...layout]]) ──────────────────────────────────────
+# One entry per category. Entries with a zone are placed first, then the
+# rest, each group in list order. An item goes to the FIRST entry (in list
+# order) whose mode matches it.
+#
+#   mode_id          -- one mode, e.g. mode_id = "rune"
+#   mode_ids         -- several modes merged into ONE category, e.g.
+#                       mode_ids = ["uniqueCharm", "magicCharm"]
+#                       Set exactly one of mode_id / mode_ids per entry.
+#                       Within one section a mode may appear in only one
+#                       entry. A duplicate is a config error (toast, no sort).
+#
+#   anchor           -- "topLeft" | "topRight" | "bottomLeft" | "bottomRight".
+#                       Default "topLeft". The corner this category starts
+#                       filling from; it grows from there toward the middle.
+#                       Categories with different anchors grow toward each
+#                       other, so the free space stays in the middle as one
+#                       connected block.
+#
+#   zone             -- optional rectangle { x, y, w, h } (same rules as
+#                       locked_cells). This category is placed only inside
+#                       that rectangle, starting from its anchor corner of
+#                       the zone. If the zone fills up, the remaining items
+#                       spill into the rest of the grid (outside every
+#                       zone) from the same anchor corner of the grid.
+#                       Leave it out to use the whole grid minus every
+#                       zone. Zones must not overlap each other or
+#                       locked_cells.
+#
+#   sort_keys        -- this category's sort order, most significant key
+#                       first; prefix "-" for descending. Optional: without
+#                       it the entry uses the built-in default order of its
+#                       first mode. An unknown key name is a config error
+#                       (toast, no sort). A key that doesn't apply to an
+#                       item (e.g. "gemGrade" on a sword) just ties.
+#                       Keys for any item:
+#                         "reqLevel"  required level
+#                         "ilvl"      item level
+#                         "name"      base item name, alphabetical
+#                         "quality"   crafted just ahead of unique; other
+#                                     qualities tie
+#                         "area"      item size in cells (w x h).
+#                                     "-area" = biggest first. Recommended
+#                                     as the first key for mixed-size
+#                                     categories in a small grid: it reduces
+#                                     holes and therefore overflow.
+#                         "height"    item height in cells ("-height" =
+#                                     tallest first)
+#                       Gear keys (same meaning as in the shared-stash
+#                       layout): "gearGroup", "handTier"
+#                       Set keys: "setName", "itemName"
+#                       Charm key: "size"  (small < large < grand)
+#                       Rune key: "runeNumber"  El = 1 ... Zod = 33 (a mod
+#                                 rune uses the number in its code, rNN; a
+#                                 Reimagined rune stack sorts right after
+#                                 its single rune)
+#                       Gem keys: "gemType"   amethyst, topaz, sapphire,
+#                                             emerald, ruby, diamond, skull,
+#                                             chaos onyx
+#                                 "gemGrade"  chipped < flawed < normal <
+#                                             flawless < perfect <
+#                                             Reimagined special gem < stack
+#                       Potion keys: "potionType"  healing, mana,
+#                                                  rejuvenation, stamina,
+#                                                  antidote, thawing
+#                                    "potionGrade" minor/small < light/large
+#                                                  < normal < greater <
+#                                                  super < full
+#
+#   gear_groups      -- gear modes only. Same 23 keys and same meaning as
+#                       in the shared-stash layout.
+#
+# ── mode_id values ─────────────────────────────────────────────────────────
+#   Same as the shared stash:
+#     set, uniqueGear, rareGear, magicGear, superiorGear, normalGear,
+#     uniqueCharm, magicCharm, uniqueJewel, rareMagicJewel,
+#     uniqueRingAmu, rareRingAmu, magicRingAmu, unclassified
+#   Misc categories (also accepted in the shared-stash layout above):
+#     rune     -- runes (El ... Zod, mod runes, Reimagined rune stacks)
+#     gem      -- gems and skulls of every grade, Reimagined gem stacks
+#     potion   -- healing / mana / rejuvenation / stamina / antidote /
+#                 thawing potions (and mod potions of those types)
+#     tool     -- Horadric Cube, Tome of Town Portal / Identify, loose
+#                 scrolls, keys, Reimagined storage items and grabbers
+#     quest    -- quest items and body parts (Horadric staff parts,
+#                 Khalim's parts, uber keys and organs, ...)
+#   In these three sections the gear modes only take items that really are
+#   gear (a helm/armor/weapon slot). Everything else that isn't a charm,
+#   jewel, ring, amulet or one of the misc categories -- e.g. Reimagined's
+#   orbs, elixirs and dyes -- goes to "unclassified".
+#   "unclassified" catches every item no other entry in THIS section
+#   claimed. If a section has no "unclassified" entry, those items stay
+#   where they are, like keep_in_place.
+#
+# ── Hot reload ─────────────────────────────────────────────────────────────
+# Every Sort press re-reads these sections from disk, `enabled` included --
+# no restart needed for anything here.
+#
+# ── Things these sections cannot do ────────────────────────────────────────
+#   - Equipped items and the belt: the SDK rejects moves there, so they are
+#     never sorted.
+#   - Moving items BETWEEN containers (e.g. inventory -> stash): out of
+#     scope. Each Sort button only rearranges its own container.
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  PERSONAL STASH
+# ═══════════════════════════════════════════════════════════════════════════
+[quyen194-item-sorting.personal_stash]
+enabled = true
+grid_width = 16
+grid_height = 13
+fill_direction = "columns"
+category_break = "band"
+on_overflow = "compact"
+locked_cells = []
+keep_in_place = []
+
+# Runes always live in the two right-most columns, El at the top.
+[[quyen194-item-sorting.personal_stash.layout]]
+mode_id = "rune"
+anchor = "topRight"
+zone = { x = 14, y = 0, w = 2, h = 13 }
+sort_keys = ["runeNumber"]
+
+[[quyen194-item-sorting.personal_stash.layout]]
+mode_id = "gem"
+sort_keys = ["gemType", "-gemGrade"]
+
+[[quyen194-item-sorting.personal_stash.layout]]
+mode_ids = ["uniqueCharm", "magicCharm"]
+sort_keys = ["-size", "quality", "reqLevel", "name"]
+
+[[quyen194-item-sorting.personal_stash.layout]]
+mode_ids = ["uniqueJewel", "rareMagicJewel", "uniqueRingAmu", "rareRingAmu", "magicRingAmu"]
+sort_keys = ["quality", "reqLevel", "name"]
+
+[[quyen194-item-sorting.personal_stash.layout]]
+mode_ids = ["uniqueGear", "set", "rareGear", "magicGear", "superiorGear", "normalGear"]
+gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "knif", "blun", "scep", "wand", "staf", "orb", "spea", "pole", "jave", "bow", "bowq", "xbow", "xboq", "h2h", "weap"]
+sort_keys = ["-area", "handTier", "gearGroup", "quality", "reqLevel"]
+
+# Potions, tools, quest items and anything else.
+[[quyen194-item-sorting.personal_stash.layout]]
+mode_id = "unclassified"
+anchor = "bottomLeft"
+sort_keys = ["-area", "name"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  INVENTORY
+# ═══════════════════════════════════════════════════════════════════════════
+[quyen194-item-sorting.inventory]
+enabled = true
+grid_width = 10
+grid_height = 8
+fill_direction = "columns"
+category_break = "none"
+on_overflow = "abort"
+locked_cells = []
+
+# Charms are arranged by hand and never moved by the plugin. Remove this
+# (keep_in_place = []) and enable the charm entry below to have the plugin
+# sort charms too.
+keep_in_place = ["uniqueCharm", "magicCharm"]
+
+# Horadric Cube, tomes, scrolls, keys: top-right corner.
+[[quyen194-item-sorting.inventory.layout]]
+mode_id = "tool"
+anchor = "topRight"
+sort_keys = ["-area", "name"]
+
+# Everything you pick up: top-left corner, so the free block stays in the
+# middle/right for more looting.
+[[quyen194-item-sorting.inventory.layout]]
+mode_id = "unclassified"
+anchor = "topLeft"
+sort_keys = ["-area", "quality", "name"]
+
+# Optional -- only if charms are removed from keep_in_place above:
+# [[quyen194-item-sorting.inventory.layout]]
+# mode_ids = ["uniqueCharm", "magicCharm"]
+# anchor = "bottomRight"
+# sort_keys = ["-size", "quality"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  HORADRIC CUBE
+# ═══════════════════════════════════════════════════════════════════════════
+[quyen194-item-sorting.cube]
+enabled = true
+grid_width = 12
+grid_height = 8
+fill_direction = "rows"
+category_break = "none"
+on_overflow = "compact"
+locked_cells = []
+keep_in_place = []
+
+[[quyen194-item-sorting.cube.layout]]
+mode_id = "rune"
+sort_keys = ["runeNumber"]
+
+[[quyen194-item-sorting.cube.layout]]
+mode_id = "gem"
+sort_keys = ["gemType", "-gemGrade"]
+
+[[quyen194-item-sorting.cube.layout]]
+mode_id = "unclassified"
+sort_keys = ["-area", "name"]
+
+# This plugin only rearranges the local player's own shared stash, personal
+# stash, inventory and cube, so its settings do not affect other players and
+# are not listed under [d2rl].

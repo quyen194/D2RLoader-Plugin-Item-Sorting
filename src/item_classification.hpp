@@ -38,6 +38,22 @@ struct Facts {
 // makes RunAutoSort's stream matchers naturally skip it.
 std::optional<Facts> Classify(uint32_t packedItemCode);
 
+// misc.txt kind for the single-grid categories rune / gem / potion / tool /
+// quest (see MiscKind), plus the item's footprint. Covers gems and runes,
+// which Classify() above deliberately leaves out. std::nullopt = not one of
+// those kinds (weapons, armor, charms, jewels, rings, amulets, Reimagined's
+// orbs/dyes/elixirs, ...). Backed by item_misc_data.hpp
+// (tools/gen_misc_classification.py), or by the mod's own misc.txt when
+// mod_data_path is set.
+struct MiscFacts {
+	MiscKind kind   = MiscKind::None;
+	uint16_t order  = 0;
+	uint16_t grade  = 0;
+	uint8_t  width  = 1;
+	uint8_t  height = 1;
+};
+std::optional<MiscFacts> ClassifyMisc(uint32_t packedItemCode);
+
 // qualityRecordId is D2RL::Items::ItemInfo::qualityRecordId, valid only for
 // quality == Set. Returns an empty string when the row is out of range or
 // has no usable group text -- the caller should treat that as "not part of

@@ -1,0 +1,13 @@
+{
+	"type": "ButtonWidget", "name": "quyen194-item-sorting/InventoryTools",
+	"fields": {
+		"rect": { "x": 110, "y": 1628, "width": 88, "height": 88 },
+		"filename": "d2rloader/quyen194-item-sorting/stash_btn_autosort",
+		"normalFrame": 0,
+		"hoveredFrame": 1,
+		"pressedFrame": 2,
+		"disabledFrame": 3,
+		"tooltipString": "@quyen194-item-sorting:SortInventoryTooltip",
+		"onClickMessage": "PanelManager:TogglePanel:quyen194-item-sorting/ActionSortInventory"
+	}
+}

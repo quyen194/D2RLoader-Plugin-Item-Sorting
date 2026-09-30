@@ -41,6 +41,22 @@ enum class NonGearKind : uint8_t {
 	None = 0, Charm, Jewel, Ring, Amulet,
 };
 
+// Finer kind for the misc.txt items the single-grid containers (personal
+// stash / inventory / cube -- see grid_sort.hpp) care about, resolved from
+// misc.txt's own `type` column through itemtypes.txt's Equiv chain (see
+// item_classification.hpp's ClassifyMisc and tools/gen_misc_classification.py).
+// Independent of isGear/gearSlot/nonGearKind above: the embedded gear table
+// keeps classifying potions/quest items as isGear=true, GearSlot::None
+// exactly as before, so the shared-stash engine's behavior is unchanged.
+enum class MiscKind : uint8_t {
+	None = 0,
+	Rune,   // itemtype chain "rune", plus Reimagined's rune stacks ("runx")
+	Gem,    // itemtype chain "gem", plus Reimagined's gem stacks ("gemx")
+	Potion, // itemtype chain "poti" (healing/mana/rejuv/stamina/antidote/thawing)
+	Tool,   // Horadric Cube ("box"), tomes, scrolls, keys, storage/grabber items
+	Quest,  // itemtype chain "ques" / "body" (minus the Horadric Cube)
+};
+
 // Facts about one item, already resolved by Phase 2 from ItemInfo plus data
 // tables. quality uses the same numeric values as D2RL::Items::Quality
 // (Magic=4, Set=5, Rare=6, Unique=7, Crafted=8) so callers can cast directly.
@@ -59,6 +75,14 @@ struct ItemFacts {
 	bool        isTwoHanded = false;
 	GearSlot    gearSlot = GearSlot::None;
 	NonGearKind nonGearKind = NonGearKind::None;
+	// Single-grid sort keys only (see MiscKind). miscOrder is the rune number
+	// (El = 1 ... Zod = 33), the gem type (1 = amethyst ... 8 = chaos onyx) or
+	// the potion type (1 = healing ... 6 = thawing); miscGrade is the gem
+	// grade (1 = chipped ... 5 = perfect, 6 = Reimagined's special gem, 7 =
+	// stack) or the potion grade (1 = minor/small ... 6 = full). 0 = n/a.
+	MiscKind    miscKind = MiscKind::None;
+	uint16_t    miscOrder = 0;
+	uint16_t    miscGrade = 0;
 	int32_t     setId = -1; // set/unique row id; -1 when not applicable
 	std::string setGroupName; // for atomic set grouping/ordering; empty if not a set item
 	std::string baseNameKey;  // tie-break text; comparison falls back to `code` when empty
@@ -122,6 +146,38 @@ std::vector<CategorySpec> DefaultLayout();
 // True when `id` is a mode_id sort_engine.cpp knows how to run (i.e. a valid
 // value for a config [[quyen194-item-sorting.layout]] entry's mode_id).
 bool IsKnownModeId(const std::string& id);
+
+// --- Building blocks shared with the single-grid engine (grid_sort.hpp) ---
+
+// True if `it` belongs to mode `id`. Always false for an unknown id and for
+// the catch-all "unclassified" (whose membership depends on the rest of the
+// layout -- the caller decides that).
+bool ModeMatchesItem(const std::string& id, const ItemFacts& it);
+
+// True for "unclassified".
+bool IsCatchAllMode(const std::string& id);
+
+// True for the gear modes (set, uniqueGear, rareGear, magicGear,
+// superiorGear, normalGear). grid_sort.cpp uses this to keep misc.txt items
+// that the gear table marks isGear=true with GearSlot::None (potions, quest
+// items, Reimagined's orbs/stacks/dyes) out of gear categories.
+bool IsGearModeId(const std::string& id);
+
+// True if `name` (without any "-" prefix) is a sort key this engine
+// resolves. Unknown names are silently ignored by the shared-stash engine;
+// the single-grid config treats them as a config error instead.
+bool IsKnownSortKey(const std::string& name);
+
+// The built-in sort_keys a mode uses when its config entry sets none.
+// Empty for an unknown id.
+std::vector<std::string> DefaultSortKeysForMode(const std::string& id);
+
+// Strict-weak "a sorts before b" for one category: `sortKeys` (most
+// significant first, "-" = descending) and `gearGroups` (the gearGroup key's
+// order) exactly as a [[layout]] entry spells them. Ties keep input order if
+// the caller uses std::stable_sort.
+std::function<bool(const ItemFacts&, const ItemFacts&)> MakeItemOrder(
+	const std::vector<std::string>& sortKeys, const std::vector<std::string>& gearGroups);
 
 struct SortOutcome {
 	bool                       ok = false;

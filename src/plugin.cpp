@@ -18,6 +18,8 @@
 
 #include <D2RLPlugin/api.h>
 
+#include "grid_config_toml.hpp"
+#include "grid_sort.hpp"
 #include "item_classification.hpp"
 #include "sort_engine.hpp"
 #include "ui_layouts.hpp"
@@ -45,7 +47,7 @@ constexpr PluginInfo kPluginInfo {
 	.name        = "Item Sorting",
 	.version     = "0.1.0",
 	.author      = "quyen19492",
-	.description = "Auto-sorts the shared stash and rotates blank tabs.",
+	.description = "Auto-sorts the shared stash, personal stash, inventory and Horadric Cube.",
 	.flags       = PluginFlags::Shared,
 };
 
@@ -60,7 +62,7 @@ const SharedEventService* g_sharedEvents = nullptr;
 Panels::RegistrationHandle  g_toastPanel         = Panels::InvalidHandle;
 SharedEvents::ListenerHandle g_uiMessageListener = SharedEvents::InvalidHandle;
 
-// Three invisible (1x1) "trigger" panels, one per button. See the "Known
+// Invisible (1x1) "trigger" panels, one per button. See the "Known
 // gaps" #6 iteration 7 note in plugin.cpp's OnUiMessage: a button's
 // onClickMessage can only target a small set of D2R-native "message
 // channels" (PanelManager is one); a plugin-invented target string is
@@ -71,6 +73,16 @@ SharedEvents::ListenerHandle g_uiMessageListener = SharedEvents::InvalidHandle;
 Panels::RegistrationHandle g_actionAutoSortPanel          = Panels::InvalidHandle;
 Panels::RegistrationHandle g_actionAddBlankPagePanel      = Panels::InvalidHandle;
 Panels::RegistrationHandle g_actionRemoveCurrentPagePanel = Panels::InvalidHandle;
+// Single-grid Sort buttons (see grid_sort.hpp): same trigger-panel trick.
+Panels::RegistrationHandle g_actionSortPersonalStashPanel = Panels::InvalidHandle;
+Panels::RegistrationHandle g_actionSortInventoryPanel     = Panels::InvalidHandle;
+Panels::RegistrationHandle g_actionSortCubePanel          = Panels::InvalidHandle;
+
+// The inventory's Sort button is a plugin child layout on the stock
+// PlayerInventory panel (the one place the SDK lets a plugin add UI to a
+// stock panel -- see ui_layouts.hpp). The personal-stash and cube buttons
+// live in the mod's own layouts instead (tools/patch_mod_stash_layout.py).
+Panels::ChildLayoutHandle g_inventoryToolsChildLayout = Panels::InvalidChildLayoutHandle;
 
 // The SDK has no query for "which shared-stash tab is on screen right now"
 // or "how many active shared-stash tabs exist" (see README "Known gaps").
@@ -129,6 +141,17 @@ struct Config {
 	// reference copy that can silently drift out of sync with it (see
 	// README "Known gaps" for the concrete bug this was added to fix).
 	std::string                                 modDataPath;
+
+	// The three single-grid containers (personal stash, inventory, cube):
+	// each section already parsed and range-checked by grid_config_toml.hpp.
+	// A container with parse errors refuses to sort (see DoSortGrid).
+	Quyen194ItemSorting::Grid::ParsedSection personalStash;
+	Quyen194ItemSorting::Grid::ParsedSection inventory;
+	Quyen194ItemSorting::Grid::ParsedSection cube;
+	// Set when the file exists but isn't valid TOML at all. The shared stash
+	// keeps its old behavior (built-in defaults); the single-grid sorts
+	// refuse to run instead, since the user clearly meant to configure them.
+	std::string                                 fileError;
 };
 
 Config g_config;
@@ -183,14 +206,25 @@ std::vector<std::string> ParseStringArray(toml::node_view<Node> node) {
 
 Config LoadConfig(const PluginContext* ctx) {
 	Config cfg;
-	cfg.layout = Quyen194ItemSorting::DefaultLayout();
+	cfg.layout        = Quyen194ItemSorting::DefaultLayout();
+	cfg.personalStash.config = Quyen194ItemSorting::Grid::DefaultConfig("personal_stash");
+	cfg.inventory.config     = Quyen194ItemSorting::Grid::DefaultConfig("inventory");
+	cfg.cube.config          = Quyen194ItemSorting::Grid::DefaultConfig("cube");
 	if (ctx == nullptr) {
 		return cfg;
 	}
 
-	std::vector<char> buffer(16 * 1024, '\0');
+	// The shipped file is ~32 KB since the single-grid sections were added;
+	// grow the buffer to whatever ReadConfig says it needs rather than
+	// assuming any fixed size.
+	std::vector<char> buffer(64 * 1024, '\0');
 	uint32_t          required = 0;
-	if (!ctx->ReadConfig(buffer.data(), static_cast<uint32_t>(buffer.size()), &required)) {
+	bool              readOk   = ctx->ReadConfig(buffer.data(), static_cast<uint32_t>(buffer.size()), &required);
+	if (required > buffer.size()) {
+		buffer.assign(static_cast<size_t>(required) + 1, '\0');
+		readOk = ctx->ReadConfig(buffer.data(), static_cast<uint32_t>(buffer.size()), &required);
+	}
+	if (!readOk) {
 		ctx->LogWarn("quyen194-item-sorting: could not read quyen194-item-sorting.toml; using built-in defaults.");
 		return cfg;
 	}
@@ -215,8 +249,13 @@ Config LoadConfig(const PluginContext* ctx) {
 	} catch (const toml::parse_error& err) {
 		const std::string msg = std::string("quyen194-item-sorting: config parse error: ") + std::string(err.description());
 		ctx->LogWarn(msg.c_str());
+		cfg.fileError = std::string(err.description()) + " (line " + std::to_string(err.source().begin.line) + ")";
 		return cfg;
 	}
+
+	cfg.personalStash = Quyen194ItemSorting::Grid::ParseGridSection(parsed, "personal_stash");
+	cfg.inventory     = Quyen194ItemSorting::Grid::ParseGridSection(parsed, "inventory");
+	cfg.cube          = Quyen194ItemSorting::Grid::ParseGridSection(parsed, "cube");
 
 	auto section = parsed["quyen194-item-sorting"];
 	cfg.enabled            = section["enabled"].value_or(true);
@@ -336,6 +375,18 @@ struct EnumState {
 	size_t                classifiedCount   = 0;
 	size_t                unclassifiedCount = 0;
 	std::vector<uint32_t> sampleUnclassifiedCodes;
+
+	// Which container this scan collects. SharedStash for the shared-stash
+	// buttons; PersonalStash / Inventory / Cube for the single-grid Sort
+	// buttons (sharedStashPage is then forced to 0 -- see below).
+	Items::ItemContainer container = Items::ItemContainer::SharedStash;
+
+	// Single-grid diagnostic: how many scanned items reported each
+	// ItemInfo::inventoryPage value. Unverified live: whether a mod's extra
+	// stash tabs (Reimagined's Gems / Materials / Runes pages) report their
+	// items as PersonalStash with some other page number -- this is what the
+	// first live run needs to show.
+	std::unordered_map<int32_t, size_t> itemsByInventoryPage;
 };
 
 auto __cdecl CollectSharedStashItem(const PluginContext* ctx, const Items::ItemInfo* item, void* userData) noexcept -> Inventory::IterationAction {
@@ -343,7 +394,7 @@ auto __cdecl CollectSharedStashItem(const PluginContext* ctx, const Items::ItemI
 	if (state == nullptr || item == nullptr || item->structSize < Items::ItemInfoRequiredSize) {
 		return Inventory::IterationAction::Continue;
 	}
-	if (item->container != Items::ItemContainer::SharedStash) {
+	if (item->container != state->container) {
 		return Inventory::IterationAction::Continue;
 	}
 
@@ -371,6 +422,26 @@ auto __cdecl CollectSharedStashItem(const PluginContext* ctx, const Items::ItemI
 		if (state->sampleUnclassifiedCodes.size() < 12) {
 			state->sampleUnclassifiedCodes.push_back(item->code);
 		}
+	}
+
+	// misc.txt kind (rune / gem / potion / tool / quest) for the single-grid
+	// categories. Also the only source of a footprint for gems and runes,
+	// which Classify() deliberately leaves out (always 1x1 in practice, same
+	// as the ItemFacts default -- so the shared stash sees no change).
+	if (auto misc = Quyen194ItemSorting::Classification::ClassifyMisc(item->code)) {
+		fact.miscKind  = misc->kind;
+		fact.miscOrder = misc->order;
+		fact.miscGrade = misc->grade;
+		if (!Quyen194ItemSorting::Classification::Classify(item->code)) {
+			fact.w = misc->width;
+			fact.h = misc->height;
+		}
+	}
+
+	if (state->container != Items::ItemContainer::SharedStash) {
+		// One grid: grid_sort.cpp and the move code treat it as "tab 0".
+		fact.sharedStashPage = 0;
+		++state->itemsByInventoryPage[item->inventoryPage];
 	}
 
 	// TrueReqLevel() is a full port of the save-editor's _ssItemSortLevel: it
@@ -1004,6 +1075,234 @@ void __cdecl DoRemoveCurrentPage(const PluginContext* ctx, void*) noexcept {
 	QueueToast(ctx, UiLayouts::OutcomeMessage::PageRemoved);
 }
 
+// --- Single-grid Sort: personal stash / inventory / Horadric Cube -------------
+// See grid_sort.hpp for the algorithm and the config file's single-grid
+// sections for every setting. Runs on the game thread, like DoAutoSort.
+
+enum class GridTarget : uintptr_t {
+	PersonalStash = 1,
+	Inventory     = 2,
+	Cube          = 3,
+};
+
+struct GridTargetInfo {
+	const char*          section;   // config section name, also the log tag
+	Items::ItemContainer container;
+};
+
+GridTargetInfo InfoFor(GridTarget target) {
+	switch (target) {
+		case GridTarget::PersonalStash: return { "personal_stash", Items::ItemContainer::PersonalStash };
+		case GridTarget::Inventory: return { "inventory", Items::ItemContainer::Inventory };
+		case GridTarget::Cube: return { "cube", Items::ItemContainer::Cube };
+	}
+	return { "personal_stash", Items::ItemContainer::PersonalStash };
+}
+
+const Quyen194ItemSorting::Grid::ParsedSection& SectionFor(const Config& cfg, GridTarget target) {
+	switch (target) {
+		case GridTarget::Inventory: return cfg.inventory;
+		case GridTarget::Cube: return cfg.cube;
+		case GridTarget::PersonalStash: break;
+	}
+	return cfg.personalStash;
+}
+
+// Sends the whole plan as ONE transaction. The SDK validates every operation
+// against an occupancy model with all moved items lifted out first, so swaps
+// and chains need no ordering, and on any failure it restores every item --
+// which is exactly the "never a half-sorted grid" promise the config file
+// makes. (The shared stash's layered/bisecting ApplyMoves exists because a
+// full shared-stash plan can exceed one transaction's 4,096 operations; a
+// single grid holds at most 16 x 16 = 256 items.)
+auto ApplyGridMoves(
+	const PluginContext* ctx, PlayerHandle player, Items::ItemContainer container, const std::vector<Quyen194ItemSorting::PlannedMove>& moves,
+	const std::vector<Quyen194ItemSorting::ItemFacts>& items, const char* section, uint32_t* committed) -> Items::Result {
+	*committed = 0;
+	if (moves.empty()) {
+		return Items::Result::Success;
+	}
+	if (moves.size() > Items::MaxExistingItemOperations) {
+		ctx->LogWarn("quyen194-item-sorting: single-grid plan has more moves than one transaction allows; refusing to split it.");
+		return Items::Result::InvalidArgument;
+	}
+
+	std::vector<Items::ExistingItemOperation> ops;
+	ops.reserve(moves.size());
+	for (const auto& mv : moves) {
+		Items::ExistingItemOperation op {};
+		op.structSize                       = Items::ExistingItemOperationSize;
+		op.kind                             = Items::ExistingItemOperationKind::Move;
+		op.item                             = static_cast<ItemHandle>(mv.handle);
+		op.move.destination.structSize      = Items::ItemDestinationSize;
+		op.move.destination.container       = container;
+		op.move.destination.placement       = Items::Placement::Exact;
+		op.move.destination.x               = static_cast<uint32_t>(mv.destX);
+		op.move.destination.y               = static_cast<uint32_t>(mv.destY);
+		op.move.destination.sharedStashPage = 0; // ignored outside SharedStash
+		ops.push_back(op);
+	}
+
+	Items::ExistingItemTransaction txn {};
+	txn.structSize     = Items::ExistingItemTransactionSize;
+	txn.player         = player;
+	txn.operationCount = static_cast<uint32_t>(ops.size());
+	txn.operations     = ops.data();
+
+	Items::ExistingItemTransactionResult result {};
+	result.structSize = Items::ExistingItemTransactionResultSize;
+
+	const auto txnResult = g_items->executeExistingItemTransaction(ctx, &txn, &result);
+	if (txnResult == Items::Result::Success) {
+		*committed = result.committedOperationCount;
+		return txnResult;
+	}
+
+	char msg[400];
+	if (result.failureIndex < ops.size()) {
+		const auto& op   = ops[result.failureIndex];
+		std::string code = "?";
+		std::string size = "?";
+		int32_t     fromX = -1, fromY = -1;
+		for (const auto& it : items) {
+			if (it.handle == static_cast<uint64_t>(op.item)) {
+				code  = UnpackItemCode(it.code);
+				size  = std::to_string(it.w) + "x" + std::to_string(it.h);
+				fromX = it.x;
+				fromY = it.y;
+				break;
+			}
+		}
+		std::snprintf(msg, sizeof(msg),
+			"quyen194-item-sorting: [%s] the game rejected the sort (result %u) at move %u/%zu: item '%s' (%s) (%d,%d) -> (%u,%u). "
+			"Nothing was moved.",
+			section, static_cast<unsigned>(txnResult), result.failureIndex + 1, ops.size(), code.c_str(), size.c_str(), fromX, fromY,
+			op.move.destination.x, op.move.destination.y);
+	} else {
+		std::snprintf(msg, sizeof(msg), "quyen194-item-sorting: [%s] the game rejected the sort (result %u) before any move. Nothing was moved.",
+			section, static_cast<unsigned>(txnResult));
+	}
+	ctx->LogWarn(msg);
+	return txnResult;
+}
+
+void __cdecl DoSortGrid(const PluginContext* ctx, void* userData) noexcept {
+	namespace UiLayouts = Quyen194ItemSorting::UiLayouts;
+	namespace Grid      = Quyen194ItemSorting::Grid;
+
+	const auto target = static_cast<GridTarget>(reinterpret_cast<uintptr_t>(userData));
+	const auto info   = InfoFor(target);
+	const std::string tag = std::string("quyen194-item-sorting: [") + info.section + "] ";
+
+	// Hot reload: every setting of every section, `enabled` included. Also
+	// refreshes mod_data_path's classification tables (see LoadConfig).
+	const Config fresh = LoadConfig(ctx);
+	if (!fresh.fileError.empty()) {
+		ctx->LogWarn((tag + "sort skipped -- quyen194-item-sorting.toml is not valid TOML: " + fresh.fileError).c_str());
+		QueueToast(ctx, UiLayouts::OutcomeMessage::GridSortConfigError);
+		return;
+	}
+	const Grid::ParsedSection& section = SectionFor(fresh, target);
+	for (const auto& w : section.warnings) {
+		ctx->LogWarn(("quyen194-item-sorting: " + w).c_str());
+	}
+	if (!section.enabled) {
+		ctx->LogInfo((tag + "sort skipped -- enabled = false.").c_str());
+		QueueToast(ctx, UiLayouts::OutcomeMessage::GridSortDisabled);
+		return;
+	}
+	if (!section.errors.empty()) {
+		for (const auto& e : section.errors) {
+			ctx->LogWarn(("quyen194-item-sorting: config error: " + e).c_str());
+		}
+		QueueToast(ctx, UiLayouts::OutcomeMessage::GridSortConfigError);
+		return;
+	}
+
+	PlayerHandle player = InvalidPlayerHandle;
+	if (g_inventory->getLocalPlayer(ctx, &player) != Inventory::Result::Success) {
+		ctx->LogWarn((tag + "sort needs an authoritative local player.").c_str());
+		QueueToast(ctx, UiLayouts::OutcomeMessage::InternalError);
+		return;
+	}
+
+	EnumState state;
+	state.container = info.container;
+	const Inventory::ItemFilter filter {
+		.structSize    = Inventory::ItemFilterSize,
+		.containerMask = Items::ContainerBit(info.container),
+	};
+	if (g_inventory->forEachInventoryItem(ctx, player, &filter, CollectSharedStashItem, &state) != Inventory::Result::Success) {
+		ctx->LogWarn((tag + "could not enumerate the container.").c_str());
+		QueueToast(ctx, UiLayouts::OutcomeMessage::InternalError);
+		return;
+	}
+
+	{
+		std::string pages;
+		for (const auto& [page, count] : state.itemsByInventoryPage) {
+			if (!pages.empty()) pages += ", ";
+			pages += "page " + std::to_string(page) + ": " + std::to_string(count);
+		}
+		char buf[512];
+		std::snprintf(buf, sizeof(buf),
+			"%sscanned %zu item(s) [%s]; %zu not in the gear/charm/jewel/ring/amulet table. Grid %ux%u, fill %s, break %s, overflow %s.",
+			tag.c_str(), state.facts.size(), pages.c_str(), state.unclassifiedCount, section.config.width, section.config.height,
+			Grid::ToString(section.config.fill), Grid::ToString(section.config.categoryBreak), Grid::ToString(section.config.onOverflow));
+		ctx->LogInfo(buf);
+	}
+
+	// Safety net, unverified live: every item of one container is expected to
+	// report the same ItemInfo::inventoryPage. If a mod's extra stash pages
+	// (Reimagined's Gems / Materials / Runes tabs) turn out to be reported as
+	// PersonalStash items on another page, their x/y are not cells of this
+	// grid -- moving them with an Exact destination could pull them out of
+	// those tabs. Refuse instead of guessing; the scan line above shows the
+	// page numbers to fix this with.
+	if (state.itemsByInventoryPage.size() > 1) {
+		ctx->LogWarn((tag + "sort refused: the container reported items on more than one inventory page (see the scan line above). "
+		                    "Nothing was moved -- please report this log.")
+				.c_str());
+		QueueToast(ctx, UiLayouts::OutcomeMessage::GridSortRejected);
+		return;
+	}
+
+	const Grid::Plan plan = Grid::PlanSort(state.facts, section.config);
+	for (const auto& line : plan.log) {
+		ctx->LogInfo(("quyen194-item-sorting: plan: " + line).c_str());
+	}
+	if (plan.status == Grid::Status::ConfigError) {
+		ctx->LogWarn((tag + "config error: " + plan.error).c_str());
+		QueueToast(ctx, UiLayouts::OutcomeMessage::GridSortConfigError);
+		return;
+	}
+	if (plan.status == Grid::Status::NoRoom) {
+		ctx->LogWarn((tag + "sort failed, nothing moved: " + plan.error).c_str());
+		QueueToast(ctx, UiLayouts::OutcomeMessage::GridSortNoRoom);
+		return;
+	}
+
+	uint32_t   committed = 0;
+	const auto txnResult = ApplyGridMoves(ctx, player, info.container, plan.moves, state.facts, info.section, &committed);
+
+	char summary[320];
+	std::snprintf(summary, sizeof(summary),
+		"%sarranged %u item(s) (%u fixed in place, %u outside the grid%s); %zu move(s) planned, %u committed (result %u).", tag.c_str(),
+		plan.itemsArranged, plan.itemsFixed, plan.itemsOutsideGrid, plan.compactRetryUsed ? ", needed the compact retry" : "", plan.moves.size(),
+		committed, static_cast<unsigned>(txnResult));
+	ctx->LogInfo(summary);
+
+	if (txnResult == Items::Result::NotAuthoritative) {
+		QueueToast(ctx, UiLayouts::OutcomeMessage::MultiplayerClientUnsupported);
+		return;
+	}
+	if (txnResult != Items::Result::Success) {
+		QueueToast(ctx, UiLayouts::OutcomeMessage::GridSortRejected);
+		return;
+	}
+	QueueToast(ctx, UiLayouts::OutcomeMessage::GridSortOk);
+}
+
 // --- On-screen shared-stash page tracking --------------------------------
 // See the g_selectedTabKnown comment near the top of this file.
 
@@ -1120,6 +1419,9 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 		{ "quyen194-item-sorting/ActionAutoSort", g_actionAutoSortPanel },
 		{ "quyen194-item-sorting/ActionAddBlankPage", g_actionAddBlankPagePanel },
 		{ "quyen194-item-sorting/ActionRemoveCurrentPage", g_actionRemoveCurrentPagePanel },
+		{ "quyen194-item-sorting/ActionSortPersonalStash", g_actionSortPersonalStashPanel },
+		{ "quyen194-item-sorting/ActionSortInventory", g_actionSortInventoryPanel },
+		{ "quyen194-item-sorting/ActionSortCube", g_actionSortCubePanel },
 	};
 	const ActionBinding* matched = nullptr;
 	for (const ActionBinding& binding : bindings) {
@@ -1138,6 +1440,27 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 	// closed. Defensive/idempotent either way -- see the comment above.
 	if (matched->handle != Panels::InvalidHandle) {
 		(void)g_panels->closePanel(ctx, matched->handle);
+	}
+
+	// Single-grid Sort buttons. `enabled` and every other setting are checked
+	// on the game thread after a fresh config read (hot reload), not here.
+	GridTarget gridTarget {};
+	bool       isGridAction = true;
+	if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionSortPersonalStash") == 0) {
+		gridTarget = GridTarget::PersonalStash;
+	} else if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionSortInventory") == 0) {
+		gridTarget = GridTarget::Inventory;
+	} else if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionSortCube") == 0) {
+		gridTarget = GridTarget::Cube;
+	} else {
+		isGridAction = false;
+	}
+	if (isGridAction) {
+		void* arg = reinterpret_cast<void*>(static_cast<uintptr_t>(gridTarget));
+		if (g_threads->runOnGameThread(ctx, DoSortGrid, arg) != Threads::Result::Success) {
+			ShowToast(ctx, UiLayouts::OutcomeMessage::InternalError);
+		}
+		return SharedEvents::UiMessageAction::Consume;
 	}
 
 	if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionAutoSort") == 0) {
@@ -1236,7 +1559,7 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 		return false;
 	}
 
-	// Three invisible trigger panels, one per button -- see the g_action*Panel
+	// Invisible trigger panels, one per button -- see the g_action*Panel
 	// declarations near the top of this file for why. Each layout file is
 	// data/global/ui/layouts/quyen194-item-sorting/Action<Name>hd.json in the
 	// companion mpq, a 1x1 Panel with no children.
@@ -1248,6 +1571,9 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 		{ "ActionAutoSort", &g_actionAutoSortPanel },
 		{ "ActionAddBlankPage", &g_actionAddBlankPagePanel },
 		{ "ActionRemoveCurrentPage", &g_actionRemoveCurrentPagePanel },
+		{ "ActionSortPersonalStash", &g_actionSortPersonalStashPanel },
+		{ "ActionSortInventory", &g_actionSortInventoryPanel },
+		{ "ActionSortCube", &g_actionSortCubePanel },
 	};
 	for (const ActionPanelSetup& setup : actionPanels) {
 		const Panels::PanelRegistration registration {
@@ -1258,6 +1584,22 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 			context->LogError("quyen194-item-sorting: could not register a button trigger panel.");
 			return false;
 		}
+	}
+
+	// The inventory's Sort button: a plugin child layout on the stock
+	// PlayerInventory panel. Its file is data/global/ui/layouts/
+	// quyen194-item-sorting/InventoryToolshd.json in the companion mpq (a
+	// single ButtonWidget root -- see that file). Keyboard/mouse only: its
+	// position is in mouse-layout coordinates. Not fatal if it fails: every
+	// other button still works.
+	const Panels::ChildLayoutRegistration inventoryTools {
+		.structSize = Panels::ChildLayoutRegistrationSize,
+		.flags      = Panels::ChildLayoutFlags::KeyboardMouseOnly,
+		.stockPanel = Panels::StockPanel::PlayerInventory,
+		.localId    = "InventoryTools",
+	};
+	if (g_panels->registerChildLayout(context, &inventoryTools, &g_inventoryToolsChildLayout) != Panels::Result::Success) {
+		context->LogWarn("quyen194-item-sorting: could not add the Sort button to the inventory panel; inventory sorting has no button.");
 	}
 
 	const SharedEvents::UiMessageListener listener {

@@ -1,6 +1,7 @@
 #include "mod_item_data.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
@@ -312,6 +313,102 @@ std::optional<LoadedTable> LoadFromFolder(const std::string& modDataPath, std::s
 		if (result.entries[i].code == result.entries[i - 1].code) {
 			return fail("duplicate packed item code while building the classification table (mod data may be malformed)");
 		}
+	}
+
+	// ---- misc.txt kinds for the single-grid categories. Same rules, in the
+	// same order, as tools/gen_misc_classification.py's classify() -- keep
+	// the two in sync.
+	{
+		static const std::unordered_map<std::string, uint16_t> kGemTypeOrder = {
+			{ "gema", 1 }, { "gemt", 2 }, { "gems", 3 }, { "geme", 4 }, { "gemr", 5 }, { "gemd", 6 }, { "gemz", 7 }, { "gemo", 8 },
+		};
+		static const std::unordered_map<std::string, uint16_t> kGemStackOrder = {
+			{ "1am", 1 }, { "1tp", 2 }, { "1sa", 3 }, { "1em", 4 }, { "1rb", 5 }, { "1di", 6 }, { "1sk", 7 }, { "1so", 8 },
+		};
+		static const std::unordered_map<std::string, uint16_t> kGemGrade = {
+			{ "gem0", 1 }, { "gem1", 2 }, { "gem2", 3 }, { "gem3", 4 }, { "gem4", 5 }, { "pgem", 6 },
+		};
+		constexpr uint16_t kGemStackGrade = 7;
+		static const std::unordered_map<std::string, uint16_t> kPotionTypeOrder = {
+			{ "hpot", 1 }, { "mpot", 2 }, { "rpot", 3 }, { "spot", 4 }, { "apot", 5 }, { "wpot", 6 },
+		};
+		auto lookup = [](const std::unordered_map<std::string, uint16_t>& map, const std::string& key) -> uint16_t {
+			auto it = map.find(key);
+			return it == map.end() ? 0 : it->second;
+		};
+		auto twoDigits = [](const std::string& code, char prefix) -> uint16_t {
+			if (code.size() == 3 && code[0] == prefix && std::isdigit(static_cast<unsigned char>(code[1])) && std::isdigit(static_cast<unsigned char>(code[2]))) {
+				return static_cast<uint16_t>((code[1] - '0') * 10 + (code[2] - '0'));
+			}
+			return 0;
+		};
+		auto potionGrade = [](const std::string& code) -> uint16_t {
+			if (code.empty()) return 0;
+			const char last = code.back();
+			if (std::isdigit(static_cast<unsigned char>(last))) return static_cast<uint16_t>(last - '0');
+			switch (last) {
+				case 'f': return 6;
+				case 'l': return 2;
+				case 's': return 1;
+				case 'o': return 3;
+				default: return 0;
+			}
+		};
+
+		for (const auto& row : miscT.rows) {
+			const std::string code     = miscT.Cell(row, "code");
+			const std::string baseType = miscT.Cell(row, "type");
+			if (code.empty() || baseType.empty()) continue;
+			const std::string type2 = miscT.Cell(row, "type2");
+
+			MiscKind kind  = MiscKind::None;
+			uint16_t order = 0;
+			uint16_t grade = 0;
+			if (code == "box") {
+				kind = MiscKind::Tool;
+			} else if (typeChainHas(baseType, { "rune" })) {
+				kind  = MiscKind::Rune;
+				order = twoDigits(code, 'r');
+			} else if (baseType == "runx") {
+				kind  = MiscKind::Rune;
+				order = twoDigits(code, 's');
+				grade = 1;
+			} else if (typeChainHas(baseType, { "gem" })) {
+				kind  = MiscKind::Gem;
+				order = lookup(kGemTypeOrder, baseType);
+				grade = lookup(kGemGrade, type2);
+			} else if (baseType == "gemx") {
+				kind  = MiscKind::Gem;
+				order = lookup(kGemStackOrder, code);
+				grade = kGemStackGrade;
+			} else if (typeChainHas(baseType, { "poti" })) {
+				kind  = MiscKind::Potion;
+				order = lookup(kPotionTypeOrder, baseType);
+				grade = potionGrade(code);
+			} else if (typeChainHas(baseType, { "book", "scro", "key", "stor", "grab" })) {
+				kind = MiscKind::Tool;
+			} else if (typeChainHas(baseType, { "ques", "body" })) {
+				kind = MiscKind::Quest;
+			} else {
+				continue;
+			}
+
+			MiscEntry entry {};
+			entry.code   = MakeItemCodeLE(code);
+			entry.kind   = kind;
+			entry.order  = order;
+			entry.grade  = grade;
+			entry.width  = static_cast<uint8_t>(std::clamp(ParseIntOr(miscT.Cell(row, "invwidth"), 1), 1, 255));
+			entry.height = static_cast<uint8_t>(std::clamp(ParseIntOr(miscT.Cell(row, "invheight"), 1), 1, 255));
+			result.miscEntries.push_back(entry);
+		}
+		std::sort(result.miscEntries.begin(), result.miscEntries.end(), [](const MiscEntry& a, const MiscEntry& b) { return a.code < b.code; });
+		// A duplicate code (a later misc.txt row redefining one) keeps the
+		// first row, same as the generator's dict keeps the last -- both are
+		// malformed data; just make lookups deterministic.
+		result.miscEntries.erase(
+			std::unique(result.miscEntries.begin(), result.miscEntries.end(), [](const MiscEntry& a, const MiscEntry& b) { return a.code == b.code; }),
+			result.miscEntries.end());
 	}
 
 	// ---- setitems.txt: row position (the "Expansion" delimiter already

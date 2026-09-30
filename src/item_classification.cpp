@@ -1,5 +1,6 @@
 #include "item_classification.hpp"
 #include "item_classification_data.hpp"
+#include "item_misc_data.hpp"
 #include "mod_item_data.hpp"
 
 #include <algorithm>
@@ -102,6 +103,23 @@ std::optional<Facts> Classify(uint32_t packedItemCode) {
 		.width        = found->width,
 		.height       = found->height,
 	};
+}
+
+std::optional<MiscFacts> ClassifyMisc(uint32_t packedItemCode) {
+	const MiscEntry* begin;
+	const MiscEntry* end;
+	if (g_override) {
+		begin = g_override->miscEntries.data();
+		end   = begin + g_override->miscEntries.size();
+	} else {
+		begin = std::cbegin(kMiscTable);
+		end   = std::cend(kMiscTable);
+	}
+	const auto* found = std::lower_bound(begin, end, packedItemCode, [](const MiscEntry& entry, uint32_t code) { return entry.code < code; });
+	if (found == end || found->code != packedItemCode) {
+		return std::nullopt;
+	}
+	return MiscFacts { .kind = found->kind, .order = found->order, .grade = found->grade, .width = found->width, .height = found->height };
 }
 
 std::string SetGroupForRow(int32_t qualityRecordId) {

@@ -194,8 +194,40 @@ bool ResolveKeyField(const std::string& name, const ItemFacts& it, const std::un
 		out.num = static_cast<int64_t>(it.h);
 		return true;
 	}
+	// Footprint keys, meaningful for any item. Mostly for the single-grid
+	// containers (grid_sort.cpp), where placing big items first ("-area")
+	// leaves fewer holes.
+	if (name == "area") {
+		out.num = static_cast<int64_t>(it.w) * static_cast<int64_t>(it.h);
+		return true;
+	}
+	if (name == "height") {
+		out.num = static_cast<int64_t>(it.h);
+		return true;
+	}
+	// misc.txt keys (see ItemFacts::miscOrder/miscGrade). An item of another
+	// kind resolves to 0 and simply ties.
+	if (name == "runeNumber") {
+		out.num = it.miscKind == MiscKind::Rune ? static_cast<int64_t>(it.miscOrder) * 2 + (it.miscGrade != 0 ? 1 : 0) : 0;
+		return true;
+	}
+	if (name == "gemType" || name == "potionType") {
+		const MiscKind want = name == "gemType" ? MiscKind::Gem : MiscKind::Potion;
+		out.num             = it.miscKind == want ? static_cast<int64_t>(it.miscOrder) : 0;
+		return true;
+	}
+	if (name == "gemGrade" || name == "potionGrade") {
+		const MiscKind want = name == "gemGrade" ? MiscKind::Gem : MiscKind::Potion;
+		out.num             = it.miscKind == want ? static_cast<int64_t>(it.miscGrade) : 0;
+		return true;
+	}
 	return false;
 }
+
+const char* const kKnownSortKeys[] = {
+	"reqLevel", "ilvl", "name", "itemName", "quality", "handTier", "gearGroup", "setName", "size",
+	"area", "height", "runeNumber", "gemType", "gemGrade", "potionType", "potionGrade",
+};
 
 CompoundKey BuildSortKey(
 	const ItemFacts& it, const std::vector<ParsedSortKey>& keys, const std::unordered_map<GearSlot, int64_t>& gearOrder) {
@@ -380,6 +412,21 @@ const std::vector<Mode>& BuiltinModes() {
 			.defaultSortKeys                = { "reqLevel", "-ilvl", "name" },
 			.streams                        = { RingAmuStream(true, IsMagic), RingAmuStream(false, IsMagic) } });
 
+		// misc.txt categories (see MiscKind). Mainly for the single-grid
+		// containers, but valid in the shared-stash layout too.
+		auto miscMode = [](const char* id, MiscKind kind, std::vector<std::string> keys) {
+			return Mode {
+				.id              = id,
+				.defaultSortKeys = std::move(keys),
+				.streams         = { Stream { .match = [kind](const ItemFacts& it) { return it.miscKind == kind; }, .dir = FillDir::Row } },
+			};
+		};
+		m.push_back(miscMode("rune", MiscKind::Rune, { "runeNumber" }));
+		m.push_back(miscMode("gem", MiscKind::Gem, { "gemType", "-gemGrade" }));
+		m.push_back(miscMode("potion", MiscKind::Potion, { "potionType", "potionGrade" }));
+		m.push_back(miscMode("tool", MiscKind::Tool, { "-area", "name" }));
+		m.push_back(miscMode("quest", MiscKind::Quest, { "-area", "name" }));
+
 		// NEW -- the catch-all. Its stream's match() is never actually called
 		// (RunAutoSort special-cases catchAll: see `streamMatches` there,
 		// which uses "not claimed by any other mode in THIS layout" instead)
@@ -550,6 +597,45 @@ std::vector<CategorySpec> DefaultLayout() {
 }
 
 bool IsKnownModeId(const std::string& id) { return FindMode(id) != nullptr; }
+
+bool ModeMatchesItem(const std::string& id, const ItemFacts& it) {
+	const Mode* mode = FindMode(id);
+	if (mode == nullptr || mode->catchAll) return false;
+	for (const auto& stream : mode->streams) {
+		if (stream.match(it)) return true;
+	}
+	return false;
+}
+
+bool IsCatchAllMode(const std::string& id) {
+	const Mode* mode = FindMode(id);
+	return mode != nullptr && mode->catchAll;
+}
+
+bool IsGearModeId(const std::string& id) {
+	return id == "set" || id == "uniqueGear" || id == "rareGear" || id == "magicGear" || id == "superiorGear" || id == "normalGear";
+}
+
+bool IsKnownSortKey(const std::string& name) {
+	for (const char* key : kKnownSortKeys) {
+		if (name == key) return true;
+	}
+	return false;
+}
+
+std::vector<std::string> DefaultSortKeysForMode(const std::string& id) {
+	const Mode* mode = FindMode(id);
+	return mode == nullptr ? std::vector<std::string> {} : mode->defaultSortKeys;
+}
+
+std::function<bool(const ItemFacts&, const ItemFacts&)> MakeItemOrder(
+	const std::vector<std::string>& sortKeys, const std::vector<std::string>& gearGroups) {
+	auto keys      = ParseSortKeys(sortKeys);
+	auto gearOrder = BuildGearGroupPriority(gearGroups);
+	return [keys = std::move(keys), gearOrder = std::move(gearOrder)](const ItemFacts& a, const ItemFacts& b) {
+		return CompoundKeyLess(BuildSortKey(a, keys, gearOrder), BuildSortKey(b, keys, gearOrder));
+	};
+}
 
 // --- Auto Sort --------------------------------------------------------
 //

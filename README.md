@@ -3,7 +3,8 @@
 A D2RLoader plugin that ports the shared-stash **auto-sort**, **add blank
 page**, and **remove current page** features from
 [D2R-Reimagined-Save-Editor](../D2R-Reimagined-Save-Editor) into a live,
-in-game plugin, built entirely on the official [D2RLoader Plugin
+in-game plugin, and adds a **Sort** button for the personal stash, the
+inventory and the Horadric Cube (see "Single-grid sorting" below), built entirely on the official [D2RLoader Plugin
 SDK](../PluginSDK) services. **It does not use `native_hook` /
 `InstallInlineHook` / `hooks.h` / `mutations.h` anywhere** -- every feature
 here (reading items, moving items, adding UI, catching button clicks) goes
@@ -52,6 +53,10 @@ first.
   selected tab (which must be empty) to the end of the stash.
 - Two small arrow buttons track which tab the plugin considers "selected"
   (see "Known gaps" -- the SDK cannot tell the plugin which tab D2R has open).
+- **Sort** buttons for the personal stash, the inventory and the Horadric
+  Cube: each arranges its one grid by category (zones, corner anchors, locked
+  cells, keep-in-place categories), configured per container -- see
+  "Single-grid sorting" below.
 - Results show in the plugin's own toast panel, per your explicit choice of
   "the plugin's own panel/toast" over D2RLoader's console or the D2R chat
   box.
@@ -72,6 +77,11 @@ src/
                                  Committed as a normal source file -- building
                                  this plugin does NOT require a checkout of
                                  D2R-Reimagined-Save-Editor.
+  item_misc_data.hpp            GENERATED (tools/gen_misc_classification.py)
+                                 misc.txt kinds rune/gem/potion/tool/quest.
+  grid_sort.hpp / .cpp          Single-grid sort (personal stash, inventory,
+                                 cube): pure algorithm, PlanSort().
+  grid_config_toml.hpp          TOML -> Grid::Config for those sections.
   ui_layouts.hpp                Child-layout button-strip JSON (compile-time
                                  constant) and the toast panel JSON (built at
                                  runtime -- see "No dynamic widget text"
@@ -87,6 +97,13 @@ tools/
                                  refresh the table (e.g. after a new D2R
                                  season changes item data) -- not part of the
                                  normal build.
+  gen_misc_classification.py    Regenerates item_misc_data.hpp from a mod's
+                                 excel folder.
+  patch_mod_stash_layout.py     Inserts the stash / cube buttons into the
+                                 mod's own layout files.
+tests/
+  grid_sort_test.cpp            Single-grid engine + config + classification
+                                 checks (no SDK needed).
 quyen194-item-sorting.toml       Default config, embedded into the DLL via
                                  d2rlplugin_embed_config() and copied out by
                                  D2RLoader on first load.
@@ -1047,6 +1064,17 @@ here for review, same as the algorithm-level scope note below.
 
 ## Testing
 
+- `tests/grid_sort_test.cpp` (single-grid sorting): parses the shipped
+  `quyen194-item-sorting.toml` with the plugin's own TOML reader and checks
+  every single-grid section parses and validates cleanly and matches
+  `Grid::DefaultConfig`; config-error detection; misc-item classification
+  (and, given a mod `.mpq` folder argument, that the runtime `mod_data_path`
+  parser agrees with the generated table); hand-checked placement scenarios
+  (anchors, zones, bands, overflow/compact, locked cells, items outside the
+  grid); and 1,200 randomized grids checking no overlaps, nothing moved into
+  locked cells, fixed items untouched, and that re-sorting a sorted grid is a
+  no-op. Build with `-DQIS_BUILD_TESTS=ON` or the g++ line in the file's
+  header, and run it from the repo root.
 - `src/sort_engine.cpp` and `src/item_classification.cpp` build cleanly
   under `g++ -std=c++20 -Wall -Wextra` (no D2RLPlugin dependency) and were
   exercised end to end with a synthetic scenario (unique gear, rare gear,
@@ -1076,7 +1104,86 @@ here for review, same as the algorithm-level scope note below.
   game pass through all five buttons per "Known gaps" #6 and #7 above is
   still the next required step.
 
-## Buttons inside the shared-stash dialog (`tools/patch_mod_stash_layout.py`)
+## Single-grid sorting: personal stash, inventory, Horadric Cube
+
+Each of these three containers gets its own **Sort** button (all three reuse
+the Auto Sort icon; the tooltip says which container it sorts):
+
+| Container | Button | Added by |
+| --- | --- | --- |
+| Personal stash | stash dialog, on the button row right of the shared-stash strip (x=398, y=1508). Visible on the Personal **and** Shared tabs (they share one container); it always sorts the personal stash | `tools/patch_mod_stash_layout.py` (`basicstash_container`) |
+| Inventory | inventory panel, bottom-left next to the gold button (x=110, y=1628) | the plugin itself: child layout `InventoryTools` on `StockPanel::PlayerInventory` (`InventoryToolshd.json` in the companion MPQ), keyboard/mouse only |
+| Horadric Cube | cube panel under the grid (x=120, y=1046), and on the stash dialog's cube tab (x=284, y=1540) | `tools/patch_mod_stash_layout.py` (`HoradricCubeLayout`, `advancedstash_horadriccube`) |
+
+Each button fires `PanelManager:TogglePanel:quyen194-item-sorting/ActionSort<PersonalStash|Inventory|Cube>`
+(same trigger-panel pattern as the shared-stash buttons).
+
+**Config:** `[quyen194-item-sorting.personal_stash]`, `.inventory` and `.cube`
+in `quyen194-item-sorting.toml`, one `[[...layout]]` list each. The file's own
+comments are the full reference (every key, every allowed value). Everything
+is re-read on every Sort press, `enabled` included. A section missing from an
+older config file falls back to built-in defaults identical to the shipped
+file (`Grid::DefaultConfig`, kept in sync by the test harness). A key with an
+invalid value makes that container refuse to sort (toast + the exact problem in
+the log) -- it never silently falls back to some other value.
+
+**Algorithm** (`src/grid_sort.*`, pure, no SDK dependency):
+
+1. Items outside `grid_width` x `grid_height` are ignored (logged).
+2. Items overlapping `locked_cells`, matching `keep_in_place`, or claimed by
+   no layout entry (when there is no `unclassified` entry) stay where they are
+   and act as obstacles.
+3. Every other item goes to the first layout entry whose mode matches it. In
+   these containers the gear modes only take real gear (`GearSlot != None`):
+   the gear table marks potions, quest items and Reimagined's orbs/stacks/dyes
+   as `isGear` with no slot, which is harmless across 200 shared tabs but
+   would scatter them through a single grid.
+4. Entries with a `zone` are placed first (inside the zone, spilling into the
+   rest of the grid outside every zone), then the others. Each entry sorts its
+   items by its `sort_keys` and places them first-fit, scanning from its
+   `anchor` corner in `fill_direction` order; with `category_break = "band"`,
+   the next zone-less entry with the same anchor starts in a fresh
+   column/row.
+5. If something doesn't fit: `on_overflow = "compact"` retries once without
+   bands, otherwise (or if that fails too) nothing is moved.
+6. The plan (only the items whose cell changes) is sent as **one**
+   `executeExistingItemTransaction`. The SDK validates it against an occupancy
+   model with every moved item lifted out first, so swaps/chains need no
+   ordering, and restores everything on failure -- so a grid is never
+   half-sorted. (The shared stash's layered/bisecting `ApplyMoves` is not used
+   here: a grid holds at most 256 items, far below one transaction's 4,096
+   operations.)
+
+**New item categories** `rune`, `gem`, `potion`, `tool`, `quest` come from
+misc.txt's `type` column through itemtypes.txt's Equiv chain
+(`ItemFacts::miscKind/miscOrder/miscGrade`, `Classification::ClassifyMisc`),
+backed by the generated `src/item_misc_data.hpp`
+(`tools/gen_misc_classification.py`) or, with `mod_data_path` set, by the
+mod's own misc.txt at runtime (`mod_item_data.cpp`, same rules). They are
+valid in the shared-stash layout too. New sort keys: `area`, `height`,
+`runeNumber`, `gemType`, `gemGrade`, `potionType`, `potionGrade`. Nothing in
+the shared stash's existing layout or behavior changes.
+
+**To verify on the first live run** (none of this could be tested outside the
+game):
+
+1. Button positions and clicks: the inventory button's coordinates assume the
+   child layout uses PlayerInventory-panel coordinates (like the old
+   `StashTools` strip); the stash/cube positions are from the mod's own layout
+   files. Adjust `InventoryToolshd.json` / the `Strip` constants in
+   `patch_mod_stash_layout.py` if anything overlaps.
+2. The scan log line (`[personal_stash] scanned N item(s) [page P: N]`):
+   Reimagined's Gems / Materials / Runes stash tabs hold items too. If they
+   are reported as `PersonalStash` items on another inventory page, the sort
+   **refuses** (toast + log) rather than risk pulling them into the grid --
+   send that log line so the filter can be made exact.
+3. Grid sizes: the shipped values are Reimagined's (16x13 / 10x8 / 12x8, read
+   from the mod's layout files). An "outside the grid" log line means a value
+   is too small.
+4. One-transaction moves inside Inventory / PersonalStash / Cube (the SDK
+   documents them; the shared stash is the only container live-tested so far).
+
+## Buttons inside the stash dialog and cube panel (`tools/patch_mod_stash_layout.py`)
 
 The plugin no longer attaches a button strip to the inventory panel. Its three
 buttons -- **Auto Sort** (sort icon), **Add Page** (+) and **Remove Page** (-)
@@ -1111,8 +1218,22 @@ name; backups are never overwritten), and the result is re-parsed as JSON and
 checked before it is written. The strip carries a version marker
 (`Quyen194ItemSortingStashButtons_v<N>`), so an older strip is replaced in place.
 Re-run it after each mod update, since the mod's installer replaces the layout
-file. `--controller` also patches `controller/bankexpansionlayouthd.json` (off
-by default: the buttons need a mouse anyway).
+files. `--controller` also patches the `controller/` copies (off by default:
+the buttons need a mouse anyway).
+
+Besides the shared-stash strip, the script now also inserts the single-grid
+Sort buttons (each strip has its own version marker, so they are checked,
+upgraded and removed independently):
+
+| Strip | File | Container | Marker |
+| --- | --- | --- | --- |
+| Sort Personal Stash | `bankexpansionlayouthd.json` | `basicstash_container` (last child) | `Quyen194ItemSortingPersonalButtons_v1` |
+| Sort Cube (stash cube tab) | `bankexpansionlayouthd.json` | `advancedstash_horadriccube` (last child; skipped if the mod has no such tab) | `Quyen194ItemSortingCubeTabButtons_v1` |
+| Sort Cube | `horadriccubelayouthd.json` | `HoradricCubeLayout` (last child) | `Quyen194ItemSortingCubeButtons_v1` |
+
+Validation parses the files leniently (trailing commas and comments, which some
+shipped D2R layouts use) and checks the strip landed and the native widgets
+around it survived.
 
 ## Building, the local `deploy/` folder, and Releases
 
@@ -1172,3 +1293,13 @@ python3 tools/gen_classification.py
 
 It reads `../D2R-Reimagined-Save-Editor/base/{itemtypes,weapons,armor,misc,
 setitems}.txt` and rewrites `src/item_classification_data.hpp` in place.
+
+The single-grid categories' misc-item table (`src/item_misc_data.hpp`) is
+generated separately, straight from a mod's excel folder:
+
+```
+python3 tools/gen_misc_classification.py "<game>/mods/Reimagined/Reimagined.mpq/data/global/excel"
+```
+
+Its rules are mirrored in `src/mod_item_data.cpp` for `mod_data_path`; keep the
+two in sync (the test harness compares them when given the mod folder).

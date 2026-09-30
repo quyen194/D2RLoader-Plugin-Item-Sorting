@@ -2,6 +2,9 @@
 	{ "Key": "AutoSortTooltip", "enUS": "Auto Sort the shared stash" },
 	{ "Key": "AddBlankPageTooltip", "enUS": "Add Page: insert an empty page after this one" },
 	{ "Key": "RemoveCurrentPageTooltip", "enUS": "Remove Page: move this empty page to the end" },
+	{ "Key": "SortPersonalStashTooltip", "enUS": "Sort the personal stash" },
+	{ "Key": "SortInventoryTooltip", "enUS": "Sort the inventory" },
+	{ "Key": "SortCubeTooltip", "enUS": "Sort the Horadric Cube" },
 
 	{ "Key": "ToastTitle", "enUS": "Quyen194 Item Sorting" },
 	{ "Key": "MsgAutoSortOk", "enUS": "Auto Sort: done. See the plugin log for item/tab counts." },
@@ -18,5 +21,10 @@
 	{ "Key": "MsgMultiplayerClientUnsupported", "enUS": "Failed: item moves as a TCP/IP client aren't supported yet (host-only in this version)." },
 	{ "Key": "MsgTabSelected", "enUS": "Selected tab changed -- see the number below." },
 	{ "Key": "MsgPageUnknown", "enUS": "Current page unknown: hover any item on this page first, then try again." },
-	{ "Key": "MsgInternalError", "enUS": "Failed: unexpected error. See the plugin log." }
+	{ "Key": "MsgInternalError", "enUS": "Failed: unexpected error. See the plugin log." },
+	{ "Key": "MsgGridSortOk", "enUS": "Sort: done. See the plugin log for item counts." },
+	{ "Key": "MsgGridSortDisabled", "enUS": "Sort: disabled (enabled = false) in quyen194-item-sorting.toml." },
+	{ "Key": "MsgGridSortConfigError", "enUS": "Sort failed: invalid settings in quyen194-item-sorting.toml. See the plugin log for the exact problem." },
+	{ "Key": "MsgGridSortNoRoom", "enUS": "Sort failed: the items don't fit in the new arrangement. Nothing was moved." },
+	{ "Key": "MsgGridSortRejected", "enUS": "Sort failed: the game rejected the moves. Nothing was moved. See the plugin log." }
 ]

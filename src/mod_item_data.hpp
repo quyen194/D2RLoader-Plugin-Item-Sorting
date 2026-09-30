@@ -14,6 +14,7 @@
 // real *.txt fixtures, independent of the Windows/MSVC-only plugin.cpp.
 
 #include "item_classification_data.hpp" // reuses ClassificationEntry
+#include "item_misc_data.hpp"           // reuses MiscEntry
 
 #include <cstdint>
 #include <optional>
@@ -51,6 +52,11 @@ struct LoadedTable {
 	// Classification::TrueReqLevel()'s AffixLevelReq helper for the decode).
 	std::vector<uint16_t> magicPrefixLevelReq;
 	std::vector<uint16_t> magicSuffixLevelReq;
+
+	// misc.txt kinds for the single-grid categories, sorted ascending by
+	// `code` like the embedded kMiscTable (same rules as
+	// tools/gen_misc_classification.py).
+	std::vector<MiscEntry> miscEntries;
 };
 
 // Reads <modDataPath>/data/global/excel/{itemtypes,weapons,armor,misc,

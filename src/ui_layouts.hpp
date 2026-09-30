@@ -37,6 +37,17 @@ inline constexpr const char* kPluginId = "quyen194-item-sorting";
 // "@quyen194-item-sorting:<Key>" entries from its strings.json. Each button
 // fires PanelManager:TogglePanel:quyen194-item-sorting/Action<Name>; see the
 // g_action*Panel comment in plugin.cpp.
+//
+// The single-grid Sort buttons follow the same pattern:
+//   - personal stash and Horadric Cube: inserted into the mod's own
+//     bankexpansionlayouthd.json / horadriccubelayouthd.json by
+//     tools/patch_mod_stash_layout.py (ActionSortPersonalStash /
+//     ActionSortCube);
+//   - inventory: a plugin child layout on StockPanel::PlayerInventory --
+//     d2rl-quyen194-item-sorting.mpq/data/global/ui/layouts/
+//     quyen194-item-sorting/InventoryToolshd.json, a single ButtonWidget
+//     firing ActionSortInventory. Registered in D2RLoaderLoadPlugin.
+// All three reuse the stash_btn_autosort sprite.
 
 // ---------------------------------------------------------------------
 // Toast panel: the plugin's own result notification, per the user's explicit
@@ -61,6 +72,12 @@ enum class OutcomeMessage : uint32_t {
 	TabSelected,
 	PageUnknown,
 	InternalError,
+	// Single-grid Sort (personal stash / inventory / cube).
+	GridSortOk,
+	GridSortDisabled,
+	GridSortConfigError,
+	GridSortNoRoom,
+	GridSortRejected,
 	Count, // not a real message; array size marker
 };
 
@@ -80,6 +97,11 @@ inline const char* OutcomeMessageWidgetName(OutcomeMessage msg) {
 		case OutcomeMessage::MultiplayerClientUnsupported: return "MsgMultiplayerClientUnsupported";
 		case OutcomeMessage::TabSelected: return "MsgTabSelected";
 		case OutcomeMessage::PageUnknown: return "MsgPageUnknown";
+		case OutcomeMessage::GridSortOk: return "MsgGridSortOk";
+		case OutcomeMessage::GridSortDisabled: return "MsgGridSortDisabled";
+		case OutcomeMessage::GridSortConfigError: return "MsgGridSortConfigError";
+		case OutcomeMessage::GridSortNoRoom: return "MsgGridSortNoRoom";
+		case OutcomeMessage::GridSortRejected: return "MsgGridSortRejected";
 		case OutcomeMessage::InternalError:
 		case OutcomeMessage::Count: return "MsgInternalError";
 	}
