@@ -160,6 +160,34 @@ static void TestShippedConfig() {
 		}
 	}
 
+	// Plugin-wide block holds only plugin-wide keys; the shared stash has its
+	// own section (plugin.cpp's LoadConfig warns about the legacy locations).
+	{
+		const auto* top = root["quyen194-item-sorting"].as_table();
+		CHECK(top != nullptr, "[quyen194-item-sorting] exists");
+		const std::set<std::string> allowedTop = { "enabled", "notification_channel", "notification_seconds", "debug_log_ui_messages",
+			"mod_data_path", "shared_stash", "personal_stash", "inventory", "cube" };
+		for (auto&& [k, v] : *top) {
+			(void)v;
+			CHECK(allowedTop.count(std::string(k.str())) == 1, "unexpected top-level key '%s'", std::string(k.str()).c_str());
+		}
+		auto shared = root["quyen194-item-sorting"]["shared_stash"];
+		CHECK(shared["enabled"].value<bool>().value_or(false), "shared_stash.enabled");
+		CHECK(shared["grid_width"].value<int64_t>().value_or(0) == 16 && shared["grid_height"].value<int64_t>().value_or(0) == 13, "shared grid 16x13");
+		const auto* layout = shared["layout"].as_array();
+		CHECK(layout != nullptr && layout->size() == 14, "shared_stash.layout has the 14 shipped entries");
+		for (const char* key : { "shared_stash_tab_count", "start_tab", "blank_tabs_at_start", "compact_empty_tabs_first", "add_empty_page_when",
+				 "add_page_enabled", "remove_page_enabled" }) {
+			CHECK(static_cast<bool>(shared[key]), "shared_stash.%s present", key);
+		}
+		if (layout) {
+			for (auto&& row : *layout) {
+				auto id = row.as_table() ? (*row.as_table())["mode_id"].value<std::string>() : std::nullopt;
+				CHECK(id && IsKnownModeId(*id), "shared_stash.layout mode_id known");
+			}
+		}
+	}
+
 	// A missing section falls back to defaults with a warning, not an error.
 	toml::table empty = toml::parse("[quyen194-item-sorting]\nenabled = true\n");
 	auto parsed       = Grid::ParseGridSection(empty, "cube");

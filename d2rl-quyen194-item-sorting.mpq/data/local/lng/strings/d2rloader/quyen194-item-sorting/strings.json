@@ -8,7 +8,7 @@
 
 	{ "Key": "ToastTitle", "enUS": "Quyen194 Item Sorting" },
 	{ "Key": "MsgAutoSortOk", "enUS": "Auto Sort: done. See the plugin log for item/tab counts." },
-	{ "Key": "MsgAutoSortDisabled", "enUS": "Auto Sort: disabled in quyen194-item-sorting.toml." },
+	{ "Key": "MsgAutoSortDisabled", "enUS": "Shared stash: disabled ([shared_stash] enabled = false in quyen194-item-sorting.toml)." },
 	{ "Key": "MsgAutoSortNotEnoughTabs", "enUS": "Auto Sort failed: not enough shared-stash tabs for the configured layout." },
 	{ "Key": "MsgAutoSortNoRoom", "enUS": "Auto Sort failed: a category needs more room than its reserved tabs." },
 	{ "Key": "MsgAutoSortSetNoRoom", "enUS": "Auto Sort failed: a set doesn't fit in its reserved tabs." },

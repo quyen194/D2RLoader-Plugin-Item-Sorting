@@ -2,100 +2,125 @@
 # D2RLoader creates <scope>/d2rloader/config/quyen194-item-sorting.toml from
 # this file the first time the plugin loads; it never overwrites a config
 # you've already edited.
+#
+# ── File structure ─────────────────────────────────────────────────────────
+#   [quyen194-item-sorting]                  plugin-wide settings (this block)
+#   [quyen194-item-sorting.shared_stash]     shared stash: Auto Sort / Add Page /
+#     [[...shared_stash.layout]]             Remove Page, one entry per category
+#   [quyen194-item-sorting.personal_stash]   personal stash Sort
+#   [quyen194-item-sorting.inventory]        inventory Sort
+#   [quyen194-item-sorting.cube]             Horadric Cube Sort
+#
+# ── What reloads when, without restarting the game ─────────────────────────
+#   Read ONCE, when the game starts (restart to change):
+#     everything in this [quyen194-item-sorting] block.
+#   Read again while you play:
+#     every section below it. Each button press re-reads its own section
+#     (the shared-stash buttons also re-read `enabled`, `add_page_enabled`
+#     and `remove_page_enabled` every time the stash opens, to show/hide
+#     themselves), so an edit takes effect on the next press.
 
 [quyen194-item-sorting]
+
+# Master switch for the whole plugin -- true | false. false: the plugin loads
+# but registers nothing (no actions, no inventory button, no toast); buttons
+# already patched into the mod's layouts stay visible but do nothing. Read
+# once at game start. To switch off just one container while playing, use
+# that section's own `enabled` instead.
 enabled = true
 
-# The SDK has no way to query how many active shared-stash tabs you have, so
-# this must be set by hand to match your actual shared stash. Auto Sort
-# fails cleanly (toast + log message) rather than guessing if this is too
-# low. A too-high value has not been shown to be harmless either -- see the
-# README's "Known gaps" #3 for an open investigation into a handful of
-# per-item rejections that first looked like this but turned out not to be.
-shared_stash_tab_count = 200
-
-# Reserved leading tabs that Auto Sort and the padding pass never touch --
-# useful if you keep a few tabs at the front you manage by hand and don't
-# want the plugin to ever rearrange.
-start_tab = 0
-
-# After sorting, pull this many empty tabs up to sit right after
-# start_tab, so you always have a few blank tabs handy at the front
-# without having to hunt for them. Set to 0 to disable.
-blank_tabs_at_start = 3
-
-# Before sorting, relabel already-empty tabs (within the active range) so
-# they all end up at the end of that range -- this gives Auto Sort a clean,
-# contiguous run of empty tabs to fill from instead of scattered gaps.
-# Leave true unless you have a specific reason to keep empty tabs exactly
-# where they currently are.
-compact_empty_tabs_first = true
-
-# Global default for the per-category add_empty_page_when below -- only
-# used by a category that doesn't set its own. Every category in this file
-# already sets its own value, so this is effectively unused as shipped;
-# it only matters if you add a new [[layout]] entry without one.
-# Accepts "never", "always", or a number 0-100 (see the per-category
-# explanation below).
-add_empty_page_when = "never"
-
-# Shared-stash Add Page / Remove Page buttons. Set one to false to hide that
-# button in the stash (its slot in the button row stays empty) and ignore its
-# action. Re-read every time you open the stash -- no game restart needed.
-add_page_enabled = false
-remove_page_enabled = false
-
-# Notification style after Auto Sort / Add Blank Page / Remove Current Page
-# finish. The only accepted value right now is "toast", which shows the
-# plugin's own toast panel with a Close button. Exact item and tab counts
-# always go to the plugin's log file, regardless of this setting.
+# Notification style after any button finishes. The only accepted value right
+# now is "toast", which shows the plugin's own toast panel with a Close
+# button. Exact item and tab counts always go to the plugin's log file,
+# regardless of this setting.
 notification_channel = "toast"
 notification_seconds = 4 # reserved for a future auto-dismiss timer; unused in v1
 
 # Debug aid only -- leave false normally. When true, every UI message the
 # plugin's listener sees (ours, other plugins', and the game's own native
 # panel/button messages) is written to the plugin log as target/command/text.
-# Turn this on, open/close/switch tabs on the Shared Stash in-game, then
-# check the log to find the exact native message the game fires for those
-# actions. This is a firehose (fires on almost every UI click), so turn it
-# back off once you're done.
+# Turn this on, click around in-game, then check the log to find the exact
+# native message the game fires. This is a firehose (fires on almost every UI
+# click), so turn it back off once you're done.
 debug_log_ui_messages = false
 
-# Item classification (which gear slot/size/set an item code is, used to sort
-# it into the right category) normally comes from a table generated at build
-# time from a bundled reference copy of itemtypes/weapons/armor/misc/
-# setitems.txt. That copy can silently drift out of sync with whatever mod
-# you actually have active (this happened for real -- see README "Known
-# gaps" for a Set-item bug this caused). Leave this empty ("") to use that
-# embedded table. Set it to your mod's own folder (the one containing a
-# data/global/excel/ subfolder with its own itemtypes.txt etc. -- typically
-# the same folder as its .mpq, e.g. a loose-folder mod during dev) to have
-# the plugin parse THAT mod's own txt files fresh instead, every Auto Sort
-# run, so classification always matches exactly what you're running. Falls
-# back to the embedded table (with a log warning) if the path or its files
-# can't be read.
+# Item classification (which gear slot/size/set/kind an item code is, used to
+# sort it into the right category, in every container) normally comes from
+# tables generated at build time from reference copies of the game's
+# itemtypes/weapons/armor/misc/setitems.txt. Those can silently drift out of
+# sync with whatever mod you actually have active (this happened for real --
+# see README "Known gaps" for a Set-item bug this caused). Leave this empty
+# ("") to use the embedded tables. Set it to your mod's own folder (the one
+# containing a data/global/excel/ subfolder with its own itemtypes.txt etc. --
+# typically the same folder as its .mpq, e.g. a loose-folder mod during dev)
+# to have the plugin parse THAT mod's own txt files instead, so classification
+# always matches exactly what you're running. Falls back to the embedded
+# tables (with a log warning) if the path or its files can't be read.
 # Example: mod_data_path = "D:\\Games\\DiabloII-Resurrected\\DiabloII-Resurrected\\mods\\Reimagined\\Reimagined.mpq"
 mod_data_path = ""
 
-# ── What reloads when, without restarting the game ─────────────────────────
-# Auto Sort re-reads this whole file from disk every time you run it, EXCEPT
-# for three settings that only take effect at plugin load time and therefore
-# need a game restart to pick up a change: `enabled`, `debug_log_ui_messages`,
-# and [quyen194-item-sorting.grid] below. (add_page_enabled /
-# remove_page_enabled reload whenever the stash opens instead.) Every other setting in this file --
-# shared_stash_tab_count, start_tab, blank_tabs_at_start,
-# compact_empty_tabs_first, add_empty_page_when, mod_data_path, and the
-# entire [[layout]] list including each entry's min_tabs /
-# add_empty_page_when / sort_keys / gear_groups -- can be edited and takes
-# effect on the very next Auto Sort run, no restart needed.
 
-# Grid size per shared-stash tab, in cells. 16x13 is the confirmed size for
-# the game's shared stash; only override this if live testing finds a
-# mismatch for your game version. Needs a game restart to take effect --
-# see the reload note above.
-[quyen194-item-sorting.grid]
-width = 16
-height = 13
+# ═══════════════════════════════════════════════════════════════════════════
+#  SHARED STASH  (Auto Sort / Add Page / Remove Page buttons on the Shared tab)
+# ═══════════════════════════════════════════════════════════════════════════
+# Everything in this section is re-read while you play: Auto Sort, Add Page
+# and Remove Page each re-read it on every press, and opening the stash
+# re-reads `enabled` / `add_page_enabled` / `remove_page_enabled` to show or
+# hide the buttons.
+[quyen194-item-sorting.shared_stash]
+
+# true | false. false hides all three shared-stash buttons (applied the next
+# time the stash opens or you switch stash tabs) and makes them do nothing if
+# clicked anyway. Only affects the shared stash; the personal stash, inventory
+# and cube have their own `enabled`. The plugin-wide switch above still
+# overrides it.
+enabled = true
+
+# Shared-stash Add Page / Remove Page buttons -- true | false. false hides
+# that button (its slot in the button row stays empty) and ignores its
+# action. Has no effect while `enabled` above is false (all three are hidden
+# then).
+add_page_enabled = false
+remove_page_enabled = false
+
+# Grid size of ONE shared-stash tab, in cells -- integers 1-16. 16 x 13 is
+# the size of the game's (and Reimagined's) shared stash; only change it if
+# live testing finds a mismatch for your game version.
+grid_width = 16
+grid_height = 13
+
+# Integer >= 1. The SDK has no way to query how many active shared-stash tabs
+# you have, so this must be set by hand to match your actual shared stash.
+# Auto Sort fails cleanly (toast + log message) rather than guessing if this
+# is too low. A too-high value has not been shown to be harmless either --
+# see the README's "Known gaps" #3 for an open investigation into a handful
+# of per-item rejections that first looked like this but turned out not to
+# be.
+shared_stash_tab_count = 200
+
+# Integer >= 0. Reserved leading tabs that Auto Sort and the padding pass
+# never touch -- useful if you keep a few tabs at the front you manage by
+# hand and don't want the plugin to ever rearrange.
+start_tab = 0
+
+# Integer >= 0. After sorting, pull this many empty tabs up to sit right
+# after start_tab, so you always have a few blank tabs handy at the front
+# without having to hunt for them. 0 = disabled.
+blank_tabs_at_start = 3
+
+# true | false. Before sorting, relabel already-empty tabs (within the active
+# range) so they all end up at the end of that range -- this gives Auto Sort
+# a clean, contiguous run of empty tabs to fill from instead of scattered
+# gaps. Leave true unless you have a specific reason to keep empty tabs
+# exactly where they currently are.
+compact_empty_tabs_first = true
+
+# "never" | "always" | a number 0-100. Global default for the per-category
+# add_empty_page_when below -- only used by a category that doesn't set its
+# own. Every category in this file already sets its own value, so this is
+# effectively unused as shipped; it only matters if you add a new [[layout]]
+# entry without one. See the per-category explanation below.
+add_empty_page_when = "never"
 
 # ── Auto-sort layout ────────────────────────────────────────────────────
 # One entry per category, in the order tabs are filled -- the first entry's
@@ -105,7 +130,7 @@ height = 13
 # instead, same as any other item this file doesn't give a dedicated
 # category to.
 #
-# Every [[layout]] entry accepts:
+# Every [[quyen194-item-sorting.shared_stash.layout]] entry accepts:
 #
 #   mode_id              -- required. One of: set, uniqueGear, uniqueRingAmu,
 #                            rareRingAmu, magicRingAmu, uniqueCharm,
@@ -178,56 +203,56 @@ height = 13
 #                            Bolts, stays right after xbow -- unless you
 #                            explicitly split them apart in your own list.)
 
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "uniqueGear"
 min_tabs = 5
 add_empty_page_when = "never"
 gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "knif", "blun", "scep", "wand", "staf", "orb", "spea", "pole", "jave", "bow", "bowq", "xbow", "xboq", "h2h", "weap"]
 sort_keys = ["handTier", "gearGroup", "quality", "reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "uniqueRingAmu"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["quality", "reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "rareRingAmu"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "magicRingAmu"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "uniqueCharm"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["-size", "quality", "reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "magicCharm"
 min_tabs = 2
 add_empty_page_when = "never"
 sort_keys = ["-size", "reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "uniqueJewel"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["quality", "reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "rareMagicJewel"
 min_tabs = 1
 add_empty_page_when = "never"
 sort_keys = ["reqLevel", "-ilvl", "name"]
 
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "set"
 min_tabs = 6
 # Always add a breathing page after Set gear -- its tabs tend to fill
@@ -235,7 +260,7 @@ min_tabs = 6
 add_empty_page_when = "always"
 sort_keys = ["setName", "reqLevel", "-ilvl", "itemName"]
 
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "rareGear"
 min_tabs = 1
 # Never add a breathing page after Rare gear -- with the quality-tier gear
@@ -249,7 +274,7 @@ sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
 # helm/weapon/etc had no dedicated category and fell all the way through to
 # "unclassified" below; now it gets its own tab(s) like every other quality
 # tier already had.
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "magicGear"
 min_tabs = 1
 add_empty_page_when = "never"
@@ -257,7 +282,7 @@ gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "k
 sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
 
 # NEW -- Superior-quality gear (same idea as magicGear above, one tier down).
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "superiorGear"
 min_tabs = 1
 add_empty_page_when = "never"
@@ -265,7 +290,7 @@ gear_groups = ["helm", "tors", "belt", "glov", "boot", "shld", "axe", "swor", "k
 sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
 
 # NEW -- Normal/white-quality gear (same idea, the plain base-item tier).
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "normalGear"
 min_tabs = 1
 add_empty_page_when = "never"
@@ -277,7 +302,7 @@ sort_keys = ["handTier", "gearGroup", "reqLevel", "-ilvl", "name"]
 # entirely, and anything this plugin doesn't classify at all (quest items,
 # keys, potions, etc). Placed last so it never steals tabs from a real
 # category ahead of it.
-[[quyen194-item-sorting.layout]]
+[[quyen194-item-sorting.shared_stash.layout]]
 mode_id = "unclassified"
 min_tabs = 1
 add_empty_page_when = "never"
@@ -287,7 +312,7 @@ sort_keys = ["quality", "reqLevel", "name"]
 # ═══════════════════════════════════════════════════════════════════════════
 #  SINGLE-GRID SORTING: Personal Stash, Inventory, Horadric Cube
 # ═══════════════════════════════════════════════════════════════════════════
-# Everything above this line is the shared stash. The three sections below
+# The shared stash's settings are above. The three sections below
 # each sort one other container, with its own Sort button:
 #   personal_stash -- button on the stash dialog's Personal tab (added to the
 #                     mod's stash layout by tools/patch_mod_stash_layout.py;

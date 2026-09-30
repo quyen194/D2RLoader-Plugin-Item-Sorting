@@ -152,7 +152,22 @@ no plugin-side handler at all.
 D2RLoader creates `<scope>/d2rloader/config/quyen194-item-sorting.toml` from
 the embedded default the first time the plugin loads, and never overwrites
 a config you've already edited. See the file's own comments for the full
-reference; the two settings you're most likely to need to change:
+reference. Structure:
+
+| Section | Holds | Read |
+| --- | --- | --- |
+| `[quyen194-item-sorting]` | plugin-wide: `enabled` (master switch -- false registers nothing), `notification_*`, `debug_log_ui_messages`, `mod_data_path` | once, at game start |
+| `[quyen194-item-sorting.shared_stash]` + `[[...shared_stash.layout]]` | shared stash: its own `enabled`, `add_page_enabled`, `remove_page_enabled`, `grid_width`/`grid_height`, `shared_stash_tab_count`, `start_tab`, `blank_tabs_at_start`, `compact_empty_tabs_first`, `add_empty_page_when`, the category list | on every Auto Sort / Add Page / Remove Page press; `enabled` and the two page toggles also whenever the stash opens (to show/hide the buttons) |
+| `[quyen194-item-sorting.personal_stash]` / `.inventory` / `.cube` | single-grid sorting (see "Single-grid sorting") | on every Sort press |
+
+Shared-stash keys left directly under `[quyen194-item-sorting]` by an older
+config file (or the old `[quyen194-item-sorting.grid]` width/height and
+`[[quyen194-item-sorting.layout]]`) are ignored with a log warning naming the
+new location. `[shared_stash] enabled = false` hides all three shared-stash
+buttons (same `setWidgetVisible` mechanism as the page toggles) and ignores
+their actions.
+
+The settings you're most likely to need to change:
 
 - `shared_stash_tab_count` -- **must match your actual shared stash tab
   count.** The SDK has no query for this (see "Known gaps" #3); Auto Sort
@@ -191,10 +206,10 @@ reference; the two settings you're most likely to need to change:
   to have the plugin parse that mod's own txt files fresh, every Auto Sort
   run, instead. Falls back to the embedded table with a log warning if the
   path or its files can't be read. See "Known gaps" #3 for why this exists.
-- Almost everything in this file (every setting except `enabled`,
-  `debug_log_ui_messages`, and `[grid]`) re-reads from disk on every Auto
-  Sort run -- edit and save the file, then just run Auto Sort again, no game
-  restart needed. See "Known gaps" #14.
+- Everything outside the plugin-wide `[quyen194-item-sorting]` block
+  re-reads from disk on every button press (see the table above) -- edit and
+  save the file, then press the button again, no game restart needed. See
+  "Known gaps" #14.
 
 ## Known gaps (please review before relying on this)
 

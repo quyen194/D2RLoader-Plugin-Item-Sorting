@@ -119,10 +119,20 @@ std::atomic<bool> g_selectedTabKnown { false };
 // the game thread.
 std::atomic<bool> g_addPageEnabled { true };
 std::atomic<bool> g_removePageEnabled { true };
+// [quyen194-item-sorting.shared_stash] enabled: false hides all three
+// shared-stash buttons and ignores their actions. Same refresh path as the two
+// flags above; the game-thread actions also re-check it from a fresh read.
+std::atomic<bool> g_sharedStashEnabled { true };
 SharedEvents::ListenerHandle g_tooltipListener = SharedEvents::InvalidHandle;
 
 struct Config {
+	// [quyen194-item-sorting] enabled: the whole plugin. Read once at load;
+	// false = register nothing (see D2RLoaderLoadPlugin).
 	bool                                        enabled    = true;
+	// Everything from here to `layout` (and addPageEnabled/removePageEnabled,
+	// startTab..addEmptyPageWhen below) is [quyen194-item-sorting.shared_stash],
+	// re-read on every shared-stash action (RefreshSharedStashConfig).
+	bool                                        sharedEnabled = true;
 	uint32_t                                    gridWidth  = 16;
 	uint32_t                                    gridHeight = 13;
 	uint32_t                                    tabCount   = 20;
@@ -285,20 +295,51 @@ Config LoadConfig(const PluginContext* ctx) {
 	cfg.inventory     = Quyen194ItemSorting::Grid::ParseGridSection(parsed, "inventory");
 	cfg.cube          = Quyen194ItemSorting::Grid::ParseGridSection(parsed, "cube");
 
+	// [quyen194-item-sorting]: plugin-wide settings only.
 	auto section = parsed["quyen194-item-sorting"];
 	cfg.enabled            = section["enabled"].value_or(true);
-	cfg.tabCount           = section["shared_stash_tab_count"].value_or(20u);
-	cfg.gridWidth          = section["grid"]["width"].value_or(16u);
-	cfg.gridHeight         = section["grid"]["height"].value_or(13u);
 	cfg.debugLogUiMessages = section["debug_log_ui_messages"].value_or(false);
-	cfg.addPageEnabled     = section["add_page_enabled"].value_or(true);
-	cfg.removePageEnabled  = section["remove_page_enabled"].value_or(true);
 
-	cfg.startTab              = section["start_tab"].value_or(0u);
-	cfg.blankTabsAtStart      = section["blank_tabs_at_start"].value_or(3u);
-	cfg.compactEmptyTabsFirst = section["compact_empty_tabs_first"].value_or(true);
+	// Keys that used to live directly under [quyen194-item-sorting] before the
+	// shared stash got its own section. An older config file would otherwise
+	// silently run on defaults, so say so.
+	for (const char* legacy : { "shared_stash_tab_count", "start_tab", "blank_tabs_at_start", "compact_empty_tabs_first", "add_empty_page_when",
+			 "add_page_enabled", "remove_page_enabled", "grid", "layout" }) {
+		if (section[legacy]) {
+			ctx->LogWarn((std::string("quyen194-item-sorting: '") + legacy
+						  + "' directly under [quyen194-item-sorting] is ignored -- shared-stash settings now live in "
+							"[quyen194-item-sorting.shared_stash] (grid.width/height became grid_width/grid_height, [[layout]] became "
+							"[[quyen194-item-sorting.shared_stash.layout]]).")
+							 .c_str());
+		}
+	}
+
+	// [quyen194-item-sorting.shared_stash]
+	auto shared = section["shared_stash"];
+	if (!shared.as_table()) {
+		ctx->LogWarn("quyen194-item-sorting: [quyen194-item-sorting.shared_stash] not found; the shared stash uses built-in defaults.");
+	}
+	auto gridSide = [&](const char* key, uint32_t fallback) -> uint32_t {
+		auto node = shared[key];
+		if (!node) return fallback;
+		auto v = node.value<int64_t>();
+		if (node.is_integer() && v && *v >= 1 && *v <= 16) return static_cast<uint32_t>(*v);
+		ctx->LogWarn((std::string("quyen194-item-sorting: [shared_stash] ") + key + " must be an integer 1-16; using " + std::to_string(fallback) + ".")
+						 .c_str());
+		return fallback;
+	};
+	cfg.sharedEnabled      = shared["enabled"].value_or(true);
+	cfg.tabCount           = shared["shared_stash_tab_count"].value_or(20u);
+	cfg.gridWidth          = gridSide("grid_width", 16u);
+	cfg.gridHeight         = gridSide("grid_height", 13u);
+	cfg.addPageEnabled     = shared["add_page_enabled"].value_or(true);
+	cfg.removePageEnabled  = shared["remove_page_enabled"].value_or(true);
+
+	cfg.startTab              = shared["start_tab"].value_or(0u);
+	cfg.blankTabsAtStart      = shared["blank_tabs_at_start"].value_or(3u);
+	cfg.compactEmptyTabsFirst = shared["compact_empty_tabs_first"].value_or(true);
 	{
-		auto node = section["add_empty_page_when"];
+		auto node = shared["add_empty_page_when"];
 		Quyen194ItemSorting::EmptyPageRule rule;
 		if (TryParseEmptyPageRule(node, &rule)) {
 			cfg.addEmptyPageWhen = rule;
@@ -309,7 +350,7 @@ Config LoadConfig(const PluginContext* ctx) {
 		}
 	}
 
-	if (auto layoutArr = section["layout"].as_array()) {
+	if (auto layoutArr = shared["layout"].as_array()) {
 		std::vector<Quyen194ItemSorting::CategorySpec> parsedLayout;
 		bool                                           allKnown = true;
 		for (auto&& node : *layoutArr) {
@@ -347,7 +388,7 @@ Config LoadConfig(const PluginContext* ctx) {
 		if (allKnown && !parsedLayout.empty()) {
 			cfg.layout = std::move(parsedLayout);
 		} else if (!allKnown) {
-			ctx->LogWarn("quyen194-item-sorting: config has an unknown mode_id in [[layout]]; using the built-in default layout instead.");
+			ctx->LogWarn("quyen194-item-sorting: config has an unknown mode_id in [[shared_stash.layout]]; using the built-in default layout instead.");
 		}
 	}
 
@@ -862,24 +903,39 @@ void QueueToast(const PluginContext* ctx, Quyen194ItemSorting::UiLayouts::Outcom
 
 // --- Button actions (run on the game thread) --------------------------
 
+// Hot reload for the three shared-stash actions: re-read the config file and
+// take the whole [quyen194-item-sorting.shared_stash] section (the
+// plugin-wide [quyen194-item-sorting] block is load-time only). Runs on the
+// game thread, like every action, so g_config is never read mid-update by
+// another action. Returns the fresh shared_stash `enabled`.
+bool RefreshSharedStashConfig(const PluginContext* ctx) {
+	Config fresh                   = LoadConfig(ctx);
+	g_config.sharedEnabled         = fresh.sharedEnabled;
+	g_config.tabCount              = fresh.tabCount;
+	g_config.gridWidth             = fresh.gridWidth;
+	g_config.gridHeight            = fresh.gridHeight;
+	g_config.addPageEnabled        = fresh.addPageEnabled;
+	g_config.removePageEnabled     = fresh.removePageEnabled;
+	g_config.layout                = std::move(fresh.layout);
+	g_config.startTab              = fresh.startTab;
+	g_config.blankTabsAtStart      = fresh.blankTabsAtStart;
+	g_config.compactEmptyTabsFirst = fresh.compactEmptyTabsFirst;
+	g_config.addEmptyPageWhen      = fresh.addEmptyPageWhen;
+	g_sharedStashEnabled.store(fresh.sharedEnabled);
+	g_addPageEnabled.store(fresh.addPageEnabled);
+	g_removePageEnabled.store(fresh.removePageEnabled);
+	if (!fresh.sharedEnabled) {
+		ctx->LogInfo("quyen194-item-sorting: shared-stash action skipped -- [quyen194-item-sorting.shared_stash] enabled = false.");
+	}
+	return fresh.sharedEnabled;
+}
+
 void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 	namespace UiLayouts = Quyen194ItemSorting::UiLayouts;
 
-	// Hot-reload: re-read the config file fresh on every Auto Sort run and
-	// take every setting except the three that only take effect at plugin
-	// load time and therefore need a game restart to change (`enabled`,
-	// `debug_log_ui_messages`, and the [grid] width/height) -- see the config
-	// file's own "What reloads when" comment. This runs on the game thread
-	// (same as the rest of DoAutoSort), so g_config is never read mid-update
-	// by another thread.
-	{
-		Config fresh                   = LoadConfig(ctx);
-		g_config.tabCount              = fresh.tabCount;
-		g_config.layout                = std::move(fresh.layout);
-		g_config.startTab              = fresh.startTab;
-		g_config.blankTabsAtStart      = fresh.blankTabsAtStart;
-		g_config.compactEmptyTabsFirst = fresh.compactEmptyTabsFirst;
-		g_config.addEmptyPageWhen      = fresh.addEmptyPageWhen;
+	if (!RefreshSharedStashConfig(ctx)) {
+		QueueToast(ctx, UiLayouts::OutcomeMessage::AutoSortDisabled);
+		return;
 	}
 
 	PlayerHandle player = InvalidPlayerHandle;
@@ -1012,6 +1068,15 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 void __cdecl DoAddBlankPage(const PluginContext* ctx, void*) noexcept {
 	namespace UiLayouts = Quyen194ItemSorting::UiLayouts;
 
+	if (!RefreshSharedStashConfig(ctx)) {
+		QueueToast(ctx, UiLayouts::OutcomeMessage::AutoSortDisabled);
+		return;
+	}
+	if (!g_config.addPageEnabled) {
+		ctx->LogInfo("quyen194-item-sorting: Add Page is disabled (add_page_enabled = false); ignoring the click.");
+		return;
+	}
+
 	PlayerHandle player = InvalidPlayerHandle;
 	if (g_inventory->getLocalPlayer(ctx, &player) != Inventory::Result::Success) {
 		QueueToast(ctx, UiLayouts::OutcomeMessage::InternalError);
@@ -1060,6 +1125,15 @@ void __cdecl DoAddBlankPage(const PluginContext* ctx, void*) noexcept {
 
 void __cdecl DoRemoveCurrentPage(const PluginContext* ctx, void*) noexcept {
 	namespace UiLayouts = Quyen194ItemSorting::UiLayouts;
+
+	if (!RefreshSharedStashConfig(ctx)) {
+		QueueToast(ctx, UiLayouts::OutcomeMessage::AutoSortDisabled);
+		return;
+	}
+	if (!g_config.removePageEnabled) {
+		ctx->LogInfo("quyen194-item-sorting: Remove Page is disabled (remove_page_enabled = false); ignoring the click.");
+		return;
+	}
 
 	PlayerHandle player = InvalidPlayerHandle;
 	if (g_inventory->getLocalPlayer(ctx, &player) != Inventory::Result::Success) {
@@ -1409,6 +1483,7 @@ void __cdecl OnItemTooltip(const PluginContext* ctx, SharedEvents::ItemTooltipEv
 //     Quyen194ItemSortingStashButtons_v4/{QisAddBlankPageButton,QisRemovePageButton}
 // Hiding one leaves an empty slot in the strip (the SDK can't move widgets).
 
+constexpr const char* kAutoSortButtonWidget   = "QisAutoSortButton";
 constexpr const char* kAddPageButtonWidget    = "QisAddBlankPageButton";
 constexpr const char* kRemovePageButtonWidget = "QisRemovePageButton";
 
@@ -1443,9 +1518,10 @@ void RefreshPageButtonToggles(const PluginContext* ctx) {
 	} catch (const toml::parse_error&) {
 		return; // keep the previous values; LoadConfig/Auto Sort log parse errors
 	}
-	auto section = parsed["quyen194-item-sorting"];
-	g_addPageEnabled.store(section["add_page_enabled"].value_or(true));
-	g_removePageEnabled.store(section["remove_page_enabled"].value_or(true));
+	auto shared = parsed["quyen194-item-sorting"]["shared_stash"];
+	g_sharedStashEnabled.store(shared["enabled"].value_or(true));
+	g_addPageEnabled.store(shared["add_page_enabled"].value_or(true));
+	g_removePageEnabled.store(shared["remove_page_enabled"].value_or(true));
 }
 
 void ApplyPageButtonVisibility(const PluginContext* ctx) {
@@ -1461,9 +1537,11 @@ void ApplyPageButtonVisibility(const PluginContext* ctx) {
 		const char* widget;
 		bool        visible;
 	};
+	const bool   shared    = g_sharedStashEnabled.load();
 	const Button buttons[] = {
-		{ kAddPageButtonWidget, g_addPageEnabled.load() },
-		{ kRemovePageButtonWidget, g_removePageEnabled.load() },
+		{ kAutoSortButtonWidget, shared },
+		{ kAddPageButtonWidget, shared && g_addPageEnabled.load() },
+		{ kRemovePageButtonWidget, shared && g_removePageEnabled.load() },
 	};
 	static std::atomic<bool> s_loggedNotFound { false };
 	for (const Button& button : buttons) {
@@ -1600,10 +1678,14 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 		return SharedEvents::UiMessageAction::Consume;
 	}
 
-	if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionAutoSort") == 0) {
-		if (!g_config.enabled) {
-			ShowToast(ctx, UiLayouts::OutcomeMessage::AutoSortDisabled);
-		} else if (g_threads->runOnGameThread(ctx, DoAutoSort, nullptr) != Threads::Result::Success) {
+	// Shared-stash buttons. [shared_stash] enabled = false normally hides
+	// them (ApplyPageButtonVisibility); this catches a click anyway. The
+	// game-thread action re-checks it from a fresh config read.
+	if (!g_sharedStashEnabled.load()) {
+		ctx->LogInfo("quyen194-item-sorting: shared stash is disabled ([quyen194-item-sorting.shared_stash] enabled = false); ignoring the click.");
+		ShowToast(ctx, UiLayouts::OutcomeMessage::AutoSortDisabled);
+	} else if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionAutoSort") == 0) {
+		if (g_threads->runOnGameThread(ctx, DoAutoSort, nullptr) != Threads::Result::Success) {
 			ShowToast(ctx, UiLayouts::OutcomeMessage::InternalError);
 		}
 	} else if (std::strcmp(matched->logicalName, "quyen194-item-sorting/ActionAddBlankPage") == 0 && !g_addPageEnabled.load()) {
@@ -1675,6 +1757,15 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 	}
 
 	g_config = LoadConfig(context);
+	if (!g_config.enabled) {
+		// Plugin-wide master switch ([quyen194-item-sorting] enabled), read
+		// once here. Register nothing: no toast, no actions, no inventory
+		// button. Buttons already patched into the mod's layouts stay
+		// visible but their clicks go nowhere.
+		context->LogInfo("quyen194-item-sorting: disabled ([quyen194-item-sorting] enabled = false); nothing registered.");
+		return true;
+	}
+	g_sharedStashEnabled.store(g_config.sharedEnabled);
 	g_addPageEnabled.store(g_config.addPageEnabled);
 	g_removePageEnabled.store(g_config.removePageEnabled);
 
@@ -1741,8 +1832,13 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 		.stockPanel = Panels::StockPanel::PlayerInventory,
 		.localId    = "InventoryTools",
 	};
-	if (g_panels->registerChildLayout(context, &inventoryTools, &g_inventoryToolsChildLayout) != Panels::Result::Success) {
-		context->LogWarn("quyen194-item-sorting: could not add the Sort button to the inventory panel; inventory sorting has no button.");
+	if (const auto r = g_panels->registerChildLayout(context, &inventoryTools, &g_inventoryToolsChildLayout); r != Panels::Result::Success) {
+		char buf[200];
+		std::snprintf(buf, sizeof(buf), "quyen194-item-sorting: could not add the Sort button to the inventory panel (result %u); inventory sorting has no button.",
+		               static_cast<unsigned>(r));
+		context->LogWarn(buf);
+	} else {
+		context->LogInfo("quyen194-item-sorting: inventory Sort button registered (child layout InventoryTools on PlayerInventory).");
 	}
 
 	const SharedEvents::UiMessageListener listener {
