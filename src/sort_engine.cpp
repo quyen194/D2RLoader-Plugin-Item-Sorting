@@ -473,8 +473,9 @@ std::vector<std::pair<int32_t, int32_t>> ScanOrder(FillDir dir, uint32_t gridW, 
 struct Occupancy {
 	uint32_t          w = 0, h = 0;
 	std::vector<bool> cells; // row-major, size w*h
+	uint32_t          freeCount = 0; // cells still false; lets a placement skip a tab too full to hold the item at all
 
-	explicit Occupancy(uint32_t gw = 0, uint32_t gh = 0) : w(gw), h(gh), cells(static_cast<size_t>(gw) * gh, false) {}
+	explicit Occupancy(uint32_t gw = 0, uint32_t gh = 0) : w(gw), h(gh), cells(static_cast<size_t>(gw) * gh, false), freeCount(gw * gh) {}
 
 	bool Free(int32_t x, int32_t y, uint32_t iw, uint32_t ih) const {
 		if (x < 0 || y < 0) return false;
@@ -486,8 +487,15 @@ struct Occupancy {
 	}
 
 	void Mark(int32_t x, int32_t y, uint32_t iw, uint32_t ih) {
-		for (uint32_t dy = 0; dy < ih; ++dy)
-			for (uint32_t dx = 0; dx < iw; ++dx) cells[static_cast<size_t>(y + dy) * w + (x + dx)] = true;
+		for (uint32_t dy = 0; dy < ih; ++dy) {
+			for (uint32_t dx = 0; dx < iw; ++dx) {
+				const size_t i = static_cast<size_t>(y + dy) * w + (x + dx);
+				if (!cells[i]) {
+					cells[i] = true;
+					--freeCount;
+				}
+			}
+		}
 	}
 };
 
@@ -740,6 +748,32 @@ SortOutcome RunAutoSort(
 		const std::vector<ParsedSortKey>            sortKeys  = EffectiveSortKeys(spec, *mode);
 		const std::unordered_map<GearSlot, int64_t> gearOrder = BuildGearGroupPriority(spec.gearGroups);
 
+		// Each stream's items in placement order, plus the cells the whole
+		// category needs. Neither depends on which tabs are being tried, so
+		// both are built once here instead of on every borrow retry below
+		// (a big category like rareGear can retry dozens of times). Sort keys
+		// are built once per item rather than inside the comparator.
+		std::vector<std::vector<const ItemFacts*>> sortedStreams;
+		uint64_t                                   categoryCells = 0;
+		if (!mode->atomicSets) {
+			for (const auto& stream : mode->streams) {
+				std::vector<std::pair<CompoundKey, const ItemFacts*>> keyed;
+				for (const auto& it : items)
+					if (streamMatches(mode, stream, it)) keyed.emplace_back(BuildSortKey(it, sortKeys, gearOrder), &it);
+				std::stable_sort(keyed.begin(), keyed.end(), [](const auto& a, const auto& b) { return CompoundKeyLess(a.first, b.first); });
+				std::vector<const ItemFacts*> sorted;
+				sorted.reserve(keyed.size());
+				for (const auto& entry : keyed) {
+					sorted.push_back(entry.second);
+					categoryCells += static_cast<uint64_t>(entry.second->w) * entry.second->h;
+				}
+				sortedStreams.push_back(std::move(sorted));
+			}
+		} else {
+			for (const auto& it : items)
+				if (mode->streams[0].match(it) && !it.setGroupName.empty()) categoryCells += static_cast<uint64_t>(it.w) * it.h;
+		}
+
 		// Tries to place the whole category (every stream, or every set
 		// group) into exactly `dests`, from a clean Occupancy grid seeded
 		// with whatever already sits in those tabs. Returns ok=false without
@@ -763,10 +797,15 @@ SortOutcome RunAutoSort(
 			}
 
 			if (!mode->atomicSets) {
-				for (const auto& stream : mode->streams) {
-					std::vector<const ItemFacts*> matched;
-					for (const auto& it : items)
-						if (streamMatches(mode, stream, it)) matched.push_back(&it);
+				// Sizes that already failed to fit in a dest tab during this
+				// attempt. Occupancy only grows within an attempt, so an item at
+				// least that wide AND tall cannot fit there either -- skipping
+				// the tab gives exactly the same placement without rescanning
+				// every cell of every nearly-full tab for every item.
+				std::unordered_map<uint32_t, std::vector<std::pair<uint32_t, uint32_t>>> failedSizes;
+				for (size_t streamIndex = 0; streamIndex < mode->streams.size(); ++streamIndex) {
+					const auto&                          stream  = mode->streams[streamIndex];
+					const std::vector<const ItemFacts*>& matched = sortedStreams[streamIndex];
 					if (matched.empty()) continue;
 					result.matchedAnything = true;
 
@@ -774,10 +813,6 @@ SortOutcome RunAutoSort(
 					for (const ItemFacts* it : matched) totalCells += static_cast<uint64_t>(it->w) * it->h;
 					const uint64_t capacityPerTab   = static_cast<uint64_t>(gridWidth) * gridHeight;
 					const uint64_t estimatedMinTabs = capacityPerTab == 0 ? 0 : (totalCells + capacityPerTab - 1) / capacityPerTab;
-
-					std::stable_sort(matched.begin(), matched.end(), [&](const ItemFacts* a, const ItemFacts* b) {
-						return CompoundKeyLess(BuildSortKey(*a, sortKeys, gearOrder), BuildSortKey(*b, sortKeys, gearOrder));
-					});
 
 					auto order = ScanOrder(stream.dir, gridWidth, gridHeight);
 
@@ -801,11 +836,23 @@ SortOutcome RunAutoSort(
 						std::optional<std::pair<int32_t, int32_t>> placed;
 						uint32_t                                    chosenTab = kUnknownTab;
 						for (uint32_t dest : dests) {
-							placed = PlaceBestFit(occByTab.at(dest), order, it->w, it->h);
+							Occupancy& occ = occByTab.at(dest);
+							if (occ.freeCount < it->w * it->h) continue;
+							auto& failed = failedSizes[dest];
+							bool  hopeless = false;
+							for (const auto& [fw, fh] : failed) {
+								if (it->w >= fw && it->h >= fh) {
+									hopeless = true;
+									break;
+								}
+							}
+							if (hopeless) continue;
+							placed = PlaceBestFit(occ, order, it->w, it->h);
 							if (placed) {
 								chosenTab = dest;
 								break;
 							}
+							failed.emplace_back(it->w, it->h);
 						}
 						if (!placed) {
 							result.failMessage = "category '" + spec.id + "' needs more room than " + std::to_string(dests.size())
@@ -927,8 +974,17 @@ SortOutcome RunAutoSort(
 			return result;
 		};
 
-		uint32_t borrowed = 0;
-		Attempt  attempt;
+		// No set of tabs with less total room than the category's own cells
+		// can ever fit it, so start borrowing at that lower bound instead of
+		// at zero -- the first attempt that fits is the same one as before,
+		// minus the retries that were bound to fail.
+		const uint64_t capacityPerTab = static_cast<uint64_t>(gridWidth) * gridHeight;
+		const uint64_t minTabsNeeded  = capacityPerTab == 0 ? 0 : (categoryCells + capacityPerTab - 1) / capacityPerTab;
+		const uint32_t borrowRoom     = tabCount > cursor + reserved ? tabCount - cursor - reserved : 0u;
+		uint32_t       borrowed       = minTabsNeeded > reserved
+		                                    ? static_cast<uint32_t>(std::min<uint64_t>(minTabsNeeded - reserved, borrowRoom))
+		                                    : 0u;
+		Attempt        attempt;
 		while (true) {
 			std::vector<uint32_t> dests;
 			for (uint32_t t = cursor; t < cursor + reserved + borrowed; ++t) dests.push_back(t);
@@ -1575,7 +1631,20 @@ std::vector<PlannedMove> CompactEmptyTabsToEnd(const std::vector<ItemFacts>& ite
 
 AutoSortPlan RunAutoSortWithPadding(const std::vector<ItemFacts>& items, const AutoSortConfig& cfg) {
 	AutoSortPlan            plan;
-	std::vector<ItemFacts>  working = items;
+
+	// Items the SDK reports in the shared stash but with no page number are
+	// in the mod's extra tabs (Reimagined's Gems / Materials / Runes), not on
+	// a normal page; a live Move out of there is rejected with Unsupported.
+	// Leave them out of the plan entirely.
+	std::vector<ItemFacts> working;
+	working.reserve(items.size());
+	for (const auto& it : items) {
+		if (it.sharedStashPage == kUnknownTab) {
+			++plan.itemsWithoutPage;
+			continue;
+		}
+		working.push_back(it);
+	}
 
 	const uint32_t startTab = std::min(cfg.startTab, cfg.tabCount);
 

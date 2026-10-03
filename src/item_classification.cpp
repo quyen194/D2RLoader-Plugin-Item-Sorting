@@ -67,6 +67,17 @@ uint32_t AffixLevelReq(uint32_t combinedId) {
 }
 }
 
+namespace {
+// The generated table and the mod_data_path parser both call anything that
+// is not a charm/jewel/ring/amulet/gem "gear", matching the save editor's
+// _ssIsGearItem -- including the mod's crafting materials, keys and orbs,
+// which match none of the gear slots. Those are not equipment, so they go to
+// the "unclassified" catch-all instead of the gear categories.
+bool IsRealGear(const ClassificationEntry& entry) {
+	return entry.isGear && entry.gearSlot != GearSlot::None;
+}
+}
+
 std::optional<Facts> Classify(uint32_t packedItemCode) {
 	if (g_override) {
 		const auto& entries = g_override->entries;
@@ -79,7 +90,7 @@ std::optional<Facts> Classify(uint32_t packedItemCode) {
 		return Facts {
 			.gearSlot     = found->gearSlot,
 			.nonGearKind  = found->nonGearKind,
-			.isGear       = found->isGear,
+			.isGear       = IsRealGear(*found),
 			.isTwoHanded  = found->isTwoHanded,
 			.baseLevelReq = found->baseLevelReq,
 			.width        = found->width,
@@ -97,7 +108,7 @@ std::optional<Facts> Classify(uint32_t packedItemCode) {
 	return Facts {
 		.gearSlot     = found->gearSlot,
 		.nonGearKind  = found->nonGearKind,
-		.isGear       = found->isGear,
+		.isGear       = IsRealGear(*found),
 		.isTwoHanded  = found->isTwoHanded,
 		.baseLevelReq = found->baseLevelReq,
 		.width        = found->width,

@@ -1134,7 +1134,17 @@ here for review, same as the algorithm-level scope note below.
     rejections look tied to the items or where they came from (their
     handles are one contiguous run, 345-417). The rejection log now also
     prints each item's scanned source page/cell and size, plus a per-source-
-    page summary, to settle this on the next run. It's
+    page summary, to settle this on the next run.
+    **Resolved:** that summary showed all 73 had no page number at all
+    (`sharedStashPage == UINT32_MAX`) -- they sit in Reimagined's extra
+    Gems / Materials / Runes tabs, which the SDK reports as SharedStash
+    items but will not move out of. `RunAutoSortWithPadding` now leaves
+    every page-less item out of the plan (`AutoSortPlan::itemsWithoutPage`,
+    logged once per run). Separately, `Classification::Classify` no longer
+    calls an item gear when it matches no gear slot (`GearSlot::None`: keys,
+    potions, the mod's crafting materials), so such an item on a normal
+    page goes to the "unclassified" catch-all instead of the gear
+    categories. It's
     still a good demonstration of this item's fix working exactly as
     intended even for a failure it wasn't built for: the 73 bad operations
     were isolated and individually logged, and every other operation in
@@ -1335,6 +1345,16 @@ than a Visual Studio solution generator (sidesteps CMake/VS-version-name
 mismatches, e.g. CMake not yet knowing a brand-new VS release's generator
 name). In VS Code's CMake Tools: select an MSVC kit, set
 `"cmake.generator": "Ninja"` in settings, pick the Release variant, build.
+Don't play-test a Debug build: `/Od` plus MSVC's checked STL makes Auto
+Sort's planning roughly 20-70x slower (measured offline on a 3600-item
+stash: 0.013 s Release vs 0.23 s Debug after the planner speed-up below,
+and 0.46 s vs 32.7 s before it -- the ~26 s game freeze of a live run).
+The speed-up (`RunAutoSort`): each category's items are sorted once
+instead of on every borrow retry, borrowing starts at the category's
+cells-based lower bound instead of zero, and a dest tab is skipped when it
+has too few free cells or already refused a no-larger item in the same
+attempt. None of these change the resulting plan (offline benchmark: same
+move list hash before and after).
 
 **Local deploy folder:** every build (any config, VS Code or the command
 line) copies the freshly built DLL -- named `d2rl-quyen19492-item-sorting.dll`,

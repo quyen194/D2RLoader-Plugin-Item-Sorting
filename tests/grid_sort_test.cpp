@@ -310,6 +310,41 @@ static void TestMiscClassification() {
 	CHECK(box && box->width == 2 && box->height == 2, "cube is 2x2");
 }
 
+// Codes a live run logged as gear(slot=0): keys, potions and the mod's crafting
+// materials. They match no gear slot, so they must not count as gear (they go
+// to the "unclassified" catch-all instead).
+static void TestSlotlessGearIsNotGear() {
+	for (const char* code : { "pk2", "pk3", "rvl", "ka3", "xa1", "ua1", "oor", "rup", "jwp", "1gc" }) {
+		auto c = Classification::Classify(Code(code));
+		CHECK(!c || !c->isGear, "Classify(%s) must not be gear", code);
+	}
+	auto cap = Classification::Classify(Code("cap"));
+	CHECK(cap && cap->isGear && cap->gearSlot == GearSlot::Helm, "a cap is still helm gear");
+}
+
+// Items with no shared-stash page (the mod's Gems / Materials / Runes tabs)
+// are left out of Auto Sort entirely -- a live Move out of there is rejected.
+static void TestAutoSortSkipsItemsWithoutPage() {
+	std::vector<ItemFacts> items;
+	for (int i = 0; i < 4; ++i) items.push_back(Item("cap", 6, i * 2, 0));
+	for (int i = 0; i < 3; ++i) {
+		ItemFacts rune      = Item("r08", 0, i, 0);
+		rune.sharedStashPage = kUnknownTab;
+		items.push_back(rune);
+	}
+	AutoSortConfig cfg;
+	cfg.layout   = DefaultLayout();
+	cfg.tabCount = 30;
+	const auto plan = RunAutoSortWithPadding(items, cfg);
+	CHECK(plan.ok, "auto sort with page-less items: %s", plan.error.c_str());
+	CHECK(plan.itemsWithoutPage == 3, "expected 3 page-less items, got %u", plan.itemsWithoutPage);
+	for (const auto& mv : plan.moves) {
+		for (const auto& it : items) {
+			if (it.handle == mv.handle) CHECK(it.sharedStashPage != kUnknownTab, "a page-less item was moved");
+		}
+	}
+}
+
 static void TestModFolderParity(const char* modDir) {
 	std::string err;
 	if (!Classification::LoadFromModFolder(modDir, &err)) {
@@ -480,6 +515,8 @@ int main(int argc, char** argv) {
 	TestValidation();
 	TestToastLayoutWidgets();
 	TestMiscClassification();
+	TestSlotlessGearIsNotGear();
+	TestAutoSortSkipsItemsWithoutPage();
 	if (argc > 1) TestModFolderParity(argv[1]);
 	TestScenarios();
 	TestRandomized();

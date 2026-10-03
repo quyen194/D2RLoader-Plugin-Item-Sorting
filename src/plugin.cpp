@@ -1091,6 +1091,12 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 			outcome.compactMoveCount, outcome.breathingTabsAdded, outcome.blankTabsAtStartAdded, g_config.blankTabsAtStart);
 		ctx->LogInfo(padMsg);
 	}
+	if (outcome.itemsWithoutPage > 0) {
+		const std::string msg = "[remote-stash] " + std::to_string(outcome.itemsWithoutPage)
+		                      + " item(s) have no shared-stash page number (they sit in the mod's Gems / Materials / Runes tabs) and "
+		                        "were left untouched.";
+		ctx->LogInfo(msg.c_str());
+	}
 
 	// Diagnostic: replay the plan against each item's live footprint and flag
 	// any two moves that would land on the same cell(s). This tells apart a

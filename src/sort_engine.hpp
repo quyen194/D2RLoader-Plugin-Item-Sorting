@@ -416,6 +416,7 @@ struct AutoSortPlan {
 	uint32_t                   compactMoveCount = 0;    // item moves spent relabeling empty tabs to the end
 	uint32_t                   breathingTabsAdded = 0;  // categories that got a pass-2 padding tab
 	uint32_t                   blankTabsAtStartAdded = 0; // of cfg.blankTabsAtStart, how many actually landed
+	uint32_t                   itemsWithoutPage = 0; // left untouched: sharedStashPage == kUnknownTab
 };
 
 AutoSortPlan RunAutoSortWithPadding(
