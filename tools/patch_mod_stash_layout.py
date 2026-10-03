@@ -101,7 +101,7 @@ class Strip:
 SHARED_STRIP = Strip(
     key="shared-stash",
     marker_prefix="Quyen19492ItemSortingStashButtons_v",
-    version=5,
+    version=5,  # plugin.cpp FindStashButton hard-codes this strip name; bump both
     container="SharedStashTabContainer",
     position="first",
     x=110,

@@ -1627,7 +1627,8 @@ void __cdecl OnItemTooltip(const PluginContext* ctx, SharedEvents::ItemTooltipEv
 // the layout patch (tools/patch_mod_stash_layout.py) inserted into the mod's
 // BankExpansionLayout:
 //   BankExpansionLayout/basicstash_container/SharedStashTabContainer/
-//     Quyen19492ItemSortingStashButtons_v4/{QisAddBlankPageButton,QisRemovePageButton}
+//     Quyen19492ItemSortingStashButtons_v5/{QisAddBlankPageButton,QisRemovePageButton}
+// The strip name must match SHARED_STRIP's marker + version in that script.
 // Hiding one leaves an empty slot in the strip (the SDK can't move widgets).
 
 constexpr const char* kAutoSortButtonWidget   = "QisAutoSortButton";
@@ -1640,7 +1641,7 @@ bool FindStashButton(const PluginContext* ctx, Widgets::WidgetHandle panel, cons
 	if (g_widgets->findWidget(ctx, panel, name, out) == Widgets::Result::Success) {
 		return true;
 	}
-	const char* const chain[] = { "basicstash_container", "SharedStashTabContainer", "Quyen19492ItemSortingStashButtons_v4" };
+	const char* const chain[] = { "basicstash_container", "SharedStashTabContainer", "Quyen19492ItemSortingStashButtons_v5" };
 	Widgets::WidgetHandle current = panel;
 	for (const char* step : chain) {
 		Widgets::WidgetHandle next = Widgets::InvalidHandle;
