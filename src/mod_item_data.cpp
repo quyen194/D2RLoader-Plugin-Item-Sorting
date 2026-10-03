@@ -84,7 +84,7 @@ bool ReadTable(const std::string& path, Table* out, std::string* error) {
 		// data, and a table indexed by ROW POSITION (SetItems/UniqueItems'
 		// qualityRecordId) does NOT count it as a row from the live game's
 		// perspective. This is the exact row the kSetGroupByRow off-by-one
-		// bug traced back to (see README "Known gaps" #3 and
+		// bug traced back to (see
 		// tools/gen_classification.py's matching comment) -- it happened to
 		// also be fully blank in its 'item'/'set' columns, but "Expansion" in
 		// column 0 is the real, general rule (confirmed against the
@@ -285,8 +285,8 @@ std::optional<LoadedTable> LoadFromFolder(const std::string& modDataPath, std::s
 		// _ssIsGearItem, which this ports) -- a code that isn't a
 		// charm/jewel/ring/amulet/gem/socket-filler counts as "gear" even
 		// when it also matches none of the 23 real gear slots (GearSlot::
-		// None). See README "Known gaps" for the class of item this
-		// produces (Reimagined's own crafting orbs/materials, keys, etc).
+		// None). That covers Reimagined's own crafting
+		// orbs/materials, keys, etc.
 		return ClassifyResult { gearSlot, NonGearKind::None, true, isTwoHanded };
 	};
 

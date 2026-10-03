@@ -12,9 +12,8 @@
 // "selected tab" arrow buttons need no item mutation, so their handlers run
 // directly from the UI-thread UiMessageListener callback that receives them.
 //
-// See README "Known gaps" for the v1 scope notes this file's comments
-// reference (item-classification approximations, no live-tested widget
-// positions, multiplayer-client relay not implemented yet, etc).
+// See README "Known limitations" for the SDK gaps this file works around
+// (multiplayer-client relay not implemented yet, etc).
 
 #include <D2RLPlugin/api.h>
 
@@ -100,7 +99,7 @@ int64_t NowMs() {
 }
 
 // The SDK has no query for "which shared-stash tab is on screen right now"
-// or "how many active shared-stash tabs exist" (see README "Known gaps").
+// or "how many active shared-stash tabs exist" (see README "Known limitations").
 // v1 works around the first gap by having the plugin track its own
 // "selected tab" pointer (moved with the < Tab / Tab > buttons, shown in the
 // toast) instead of the tab D2R itself has open; the second gap is worked
@@ -156,7 +155,7 @@ struct Config {
 	uint32_t                                    gridHeight = 13;
 	uint32_t                                    tabCount   = 20;
 	std::vector<ItemSorting::CategorySpec> layout;
-	// Debug aid for the "Known gaps" #6/#7 live-layout work: when true, every
+	// Debug aid: when true, every
 	// incoming UiMessageEvent (ours and every other plugin's/D2R's own) is
 	// logged as target/command, so the exact native message D2R fires when
 	// the Shared Stash panel opens/closes/switches tabs can be found by
@@ -189,8 +188,8 @@ struct Config {
 	// data/global/excel/{itemtypes,weapons,armor,misc,setitems}.txt are
 	// parsed fresh (see mod_item_data.hpp) so item classification always
 	// matches whichever mod is actually active, instead of a bundled
-	// reference copy that can silently drift out of sync with it (see
-	// README "Known gaps" for the concrete bug this was added to fix).
+	// reference copy that can silently drift out of sync with it (a stale
+	// SetItems.txt row order once misplaced set items).
 	std::string                                 modDataPath;
 
 	// The three single-grid containers (personal stash, inventory, cube):
@@ -492,7 +491,7 @@ std::string UnpackItemCode(uint32_t packedCode) {
 struct EnumState {
 	std::vector<ItemSorting::ItemFacts> facts;
 
-	// Classification coverage diagnostic (README "Known gaps" -- the
+	// Classification coverage diagnostic (the
 	// generated item_classification_data.hpp table is only as good as its
 	// source *.txt snapshot). A code that fails to classify falls back to
 	// ItemFacts{} defaults (isGear=false, w=h=1), which silently excludes it
@@ -605,15 +604,14 @@ auto __cdecl CollectSharedStashItem(const PluginContext* ctx, const Items::ItemI
 		// out-of-range/off-by-one index into kSetGroupByRow (a genuine data
 		// gap in that generated table) or something else entirely (e.g. a
 		// qualityRecordId the live SDK assigns that this table's row layout
-		// was never built to represent). Not yet confirmed -- see README
-		// "Known gaps" #3.
+		// was never built to represent). It turned out to be an
+		// off-by-one in kSetGroupByRow; the log stays as a safety net.
 		if (fact.setGroupName.empty() && ctx != nullptr) {
 			char msg[224];
 			std::snprintf(
 				msg, sizeof(msg),
 				"%sset item handle %llu (code='%s') has qualityRecordId=%d, which "
-				"could not be mapped to a set name; Auto Sort will leave it exactly where it is (see "
-				"README Known gaps #3).",
+				"could not be mapped to a set name; Auto Sort will leave it exactly where it is.",
 				LogTagFor(state->container), static_cast<unsigned long long>(item->handle), UnpackItemCode(item->code).c_str(),
 				item->qualityRecordId);
 			ctx->LogWarn(msg);
@@ -631,8 +629,7 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 	};
 	const bool ok = g_inventory->forEachInventoryItem(ctx, player, &filter, CollectSharedStashItem, state) == Inventory::Result::Success;
 
-	// Always-on diagnostic for "Known gaps" #8 -- the single biggest
-	// unverified assumption this whole plugin rests on: that
+	// Always-on diagnostic for the assumption this whole plugin rests on: that
 	// forEachInventoryItem + ItemContainer::SharedStash enumerates every
 	// tab (disambiguated via ItemInfo::sharedStashPage), not just whichever
 	// tab is currently open on screen. Cheap (only runs when a button is
@@ -664,7 +661,7 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 			sizeof(buf),
 			"[remote-stash] shared-stash scan: %zu item(s) across %zu distinct page(s) [%s] (1-based, as shown in-game). If this "
 			"stays the SAME single page no matter which page is open in-game when you click a button, "
-			"forEachInventoryItem is only returning the currently open tab, not every tab (see README Known gaps #8).",
+			"forEachInventoryItem is only returning the currently open tab, not every tab.",
 			state->facts.size(),
 			tabs.size(),
 			tabList.c_str());
@@ -714,7 +711,7 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 // offline replay of a live run's data (same classification table, same
 // config) pointed at a pattern worth confirming directly: every rejection
 // so far has landed on an item the "unclassified" catch-all category placed
-// (a potion, gem, rune, or quest item -- see README "Known gaps" #3), never
+// (a potion, gem, rune, or quest item), never
 // on ordinary gear/charm/jewel/ring/amulet. This line is what the next real
 // run needs to confirm or rule that out for good, instead of inferring it
 // from tab numbers after the fact. (UnpackItemCode itself now lives above,
@@ -831,8 +828,7 @@ auto ApplyMoves(
 			// handle) -- added after a live run's rejections turned out to
 			// cluster entirely on Misc.txt-classified items (potions, gems,
 			// runes, quest items) landing in the "unclassified" catch-all
-			// category, not on anything about the destination tab. See
-			// README "Known gaps" #3.
+			// category, not on anything about the destination tab.
 			std::string category = "?";
 			std::string codeText;
 			// Where the item sat when the plan was made (the scan), so a cluster
@@ -883,7 +879,7 @@ auto ApplyMoves(
 				static_cast<unsigned long long>(op.item), codeText.c_str(), category.c_str(), sizeText.c_str(), sourceText.c_str(), destText.c_str(),
 				static_cast<unsigned>(txnResult),
 				isScratch ? " [this was a temporary scratch-cell parking move to break a dependency cycle, not the item's real "
-							"destination -- see README Known gaps #3/#8]"
+							"destination]"
 						  : "");
 			ctx->LogWarn(msg);
 			return;
@@ -1114,7 +1110,7 @@ void __cdecl DoAutoSort(const PluginContext* ctx, void*) noexcept {
 	// any two moves that would land on the same cell(s). This tells apart a
 	// planning-side bug (RunAutoSort / item classification data) from an
 	// application-side one (ApplyMoves / the live transaction) when the
-	// in-game result looks wrong -- see README "Known gaps".
+	// in-game result looks wrong.
 	const auto collisions = ItemSorting::DetectCollisions(state.facts, outcome.moves, g_config.gridWidth, g_config.gridHeight);
 	if (!collisions.empty()) {
 		char summary[192];
@@ -1769,7 +1765,7 @@ auto __cdecl OnUiMessage(const PluginContext* ctx, const SharedEvents::UiMessage
 		return SharedEvents::UiMessageAction::Continue;
 	}
 
-	// Debug aid for "Known gaps" #6/#7: with debug_log_ui_messages = true in
+	// Debug aid: with debug_log_ui_messages = true in
 	// the config, log every message this listener sees -- ours, every other
 	// plugin's, and D2R's own native panel/button messages -- so the exact
 	// target/command D2R fires when Shared Stash opens, closes, or switches

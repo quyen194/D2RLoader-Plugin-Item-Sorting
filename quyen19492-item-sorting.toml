@@ -53,8 +53,8 @@ debug_log_ui_messages = false
 # sort it into the right category, in every container) normally comes from
 # tables generated at build time from reference copies of the game's
 # itemtypes/weapons/armor/misc/setitems.txt. Those can silently drift out of
-# sync with whatever mod you actually have active (this happened for real --
-# see README "Known gaps" for a Set-item bug this caused). Leave this empty
+# sync with whatever mod you actually have active (this happened for real:
+# a stale SetItems.txt row order once misplaced set items). Leave this empty
 # ("") to use the embedded tables. Set it to your mod's own folder (the one
 # containing a data/global/excel/ subfolder with its own itemtypes.txt etc. --
 # typically the same folder as its .mpq, e.g. a loose-folder mod during dev)
@@ -97,10 +97,7 @@ grid_height = 13
 # Integer >= 1. The SDK has no way to query how many active shared-stash tabs
 # you have, so this must be set by hand to match your actual shared stash.
 # Auto Sort fails cleanly (toast + log message) rather than guessing if this
-# is too low. A too-high value has not been shown to be harmless either --
-# see the README's "Known gaps" #3 for an open investigation into a handful
-# of per-item rejections that first looked like this but turned out not to
-# be.
+# is too low.
 shared_stash_tab_count = 200
 
 # Integer >= 0. Reserved leading tabs that Auto Sort and the padding pass

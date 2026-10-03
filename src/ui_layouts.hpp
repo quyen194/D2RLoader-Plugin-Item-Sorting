@@ -3,7 +3,7 @@
 // UI layout notes and the widget names plugin.cpp shares with the companion
 // mpq layouts of the Quyen19492 Item Sorting plugin.
 //
-// Design note (v1 scope, see README "Known gaps" -- flagged for sign-off):
+// Design note (see README "Known limitations"):
 // D2RLPlugin::WidgetService has no "set widget text" call (only
 // getInputText, which reads InputTextBoxWidget content, and
 // setWidgetVisible/setWidgetEnabled). There is therefore no supported way to

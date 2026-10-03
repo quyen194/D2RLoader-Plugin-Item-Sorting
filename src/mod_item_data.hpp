@@ -5,8 +5,7 @@
 // itemtypes/weapons/armor/misc/setitems.txt directly off disk, at plugin
 // load/config-load time, so item classification always matches whichever
 // mod is actually active instead of a possibly-stale bundled reference copy
-// (see README "Known gaps" for the concrete bug this was written to fix --
-// a live report showed the embedded table's SetItems.txt row numbering had
+// (a live report showed the embedded table's SetItems.txt row numbering had
 // drifted from the game's own qualityRecordId numbering).
 //
 // This file has no PluginSDK dependency (same as item_classification.cpp/

@@ -202,7 +202,7 @@ struct SortOutcome {
 };
 
 // tabCount is the number of *active* normal shared-stash tabs, discovered by
-// Phase 2 (the SDK has no tab-count query -- see README "Open questions").
+// Phase 2 (the SDK has no tab-count query -- see README "Known limitations").
 // gridWidth/gridHeight default to the save-editor's confirmed 16x13. startTab
 // reserves that many leading tabs: the layout's first category starts at
 // tab `startTab` instead of tab 0, and nothing in this call ever targets a
@@ -223,7 +223,7 @@ SortOutcome RunAutoSort(
 // collision found (capped), empty if the plan is clean. This exists purely
 // to tell planning-side bugs (RunAutoSort/classification data) apart from
 // application-side ones (ApplyMoves/the live transaction) when a sort looks
-// wrong in-game -- see README "Known gaps".
+// wrong in-game.
 std::vector<std::string> DetectCollisions(
 	const std::vector<ItemFacts>&    items,
 	const std::vector<PlannedMove>&  moves,
@@ -312,8 +312,8 @@ struct SequencedMoves {
 	// .cpp) picks the first free cell starting from tab 0, but a busy stash
 	// can easily have no free cell left anywhere in the tabs the plan
 	// itself actually uses, spilling scratch picks into tabs past that --
-	// tabs the plan never places a single real item into, and (unconfirmed,
-	// see README "Known gaps" #3/#8) possibly not "materialized" for a live
+	// tabs the plan never places a single real item into, and (unconfirmed)
+	// possibly not "materialized" for a live
 	// Move if the player has never opened them either. This flag is what
 	// lets that be told apart, in the log, from a real placement failing.
 	std::vector<bool> isScratchMove;

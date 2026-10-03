@@ -13,7 +13,7 @@ item's packed 4-byte code (same encoding as D2RL::Items::MakeItemCode /
 ItemInfo.code), so plugin.cpp needs no DataTableService row-layout knowledge
 (the SDK does not publish ItemTypes/Weapons/Armor/Misc row struct layouts).
 
-v1 simplification (see README "Known gaps"): sortLevel only carries the base
+v1 simplification: sortLevel only carries the base
 item's own levelreq column. It does NOT add the unique/set 'lvl req' bump or
 the rolled affix levelreq bump the save-editor's _ssItemSortLevel applies,
 because those need UniqueItems/SetItems/MagicAffixes row data the SDK does

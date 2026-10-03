@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-Guidance for Claude when working in this repo. `README.md` is the full developer
-documentation (design decisions, numbered "Known gaps", config reference); read the
+Guidance for Claude when working in this repo. `README.md` is the developer
+documentation (how it works, config reference, numbered "Known limitations"); read the
 relevant section there before changing behaviour it describes.
 
 ## What this is
@@ -28,7 +28,7 @@ the personal stash, inventory and Horadric Cube (single-grid sorting).
   with the SDK, say so and propose a workaround — don't reach for a hook.
 - **Triggered by UI buttons**, not console commands or hotkeys.
 - **Must work as a multiplayer TCP/IP client**, not only host/local (see README Known
-  gaps #9 for current status).
+  limitations #4 for current status).
 - Single-grid scope: also sorts the Cube; grid sizes are configurable; there is
   deliberately **no** "send inventory items to stash" button; charms are arranged by
   hand by the user.
@@ -103,14 +103,16 @@ than hand-editing them.
 - A transaction rejects the whole chunk if any item handle appears twice — plans must
   contain one move per handle (see `RunAutoSortWithPadding`). Chunks max 4096 ops.
 - The SDK can't report the shared-stash tab count or which tab is on screen; both are
-  worked around (README Known gaps #3, #4). No dynamic widget text (#5).
-- UI messages: `"quyen19492-item-sorting:<Command>"`, one `UiMessageListener` in
-  `plugin.cpp` dispatches on `command`.
+  worked around (README Known limitations #1, #2). No dynamic widget text (#3).
+- Buttons send `PanelManager:TogglePanel:quyen19492-item-sorting/Action<Name>` against
+  invisible trigger panels (D2R drops plugin-invented message targets); one
+  `UiMessageListener` in `plugin.cpp` dispatches on the panel name.
 - After changing button ids or layouts, users must re-run
   `tools/patch_mod_stash_layout.py` against the mod.
 
 ## Conventions
 
 - Owner communicates in Vietnamese; code, comments, commits and docs are in English.
-- Keep README.md in sync when behaviour, config keys or Known gaps change.
+- Keep README.md in sync when behaviour, config keys or Known limitations change. Keep it
+  short: describe the current state, not the history of fixes.
 - Don't commit save files (`*.d2i`) or anything under `build/` / `deploy/`.

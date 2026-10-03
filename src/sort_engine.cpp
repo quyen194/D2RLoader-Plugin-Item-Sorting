@@ -557,7 +557,7 @@ struct OwnerGrid {
 // small item placed after a big one backfills whatever gap the big one left
 // instead of losing that gap forever -- this plugin trades the save-editor's
 // "order over density" guarantee for denser packing (fewer tabs used), by
-// request (see README "Known gaps").
+// request (see README "Known limitations").
 std::optional<std::pair<int32_t, int32_t>> PlaceBestFit(
 	Occupancy& occ, const std::vector<std::pair<int32_t, int32_t>>& order, uint32_t iw, uint32_t ih) {
 	for (const auto& [x, y] : order) {
@@ -663,8 +663,7 @@ std::function<bool(const ItemFacts&, const ItemFacts&)> MakeItemOrder(
 //
 // Not yet ported: sweeping foreign items out of a target tab, and handing
 // spare tabs to empty categories afterwards (the save-editor's padding
-// pass) -- tracked as follow-up work (README "Known gaps vs. the
-// save-editor").
+// pass) -- tracked as follow-up work (README "Known limitations").
 SortOutcome RunAutoSort(
 	const std::vector<ItemFacts>& items, const std::vector<CategorySpec>& layout, uint32_t tabCount, uint32_t gridWidth,
 	uint32_t gridHeight, uint32_t startTab) {
