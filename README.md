@@ -160,6 +160,16 @@ toast's Close button instead sends D2RCore's own built-in
 `"PanelManager:ClosePanel:quyen19492-item-sorting/Toast"` message, so it needs
 no plugin-side handler at all.
 
+### Log tags
+
+D2RLoader prefixes every line in the plugin's log with
+`[Plugin:quyen19492-item-sorting]`. After that, each message starts with the
+feature it is about: `[remote-stash]` (shared stash: Auto Sort, Add / Remove
+Page, on-screen page tracking), `[personal-stash]`, `[inventory]`, `[cube]`,
+`[config]` (reading `quyen19492-item-sorting.toml`) and `[plugin]` (loading,
+service checks, the `debug_log_ui_messages` firehose). `LogTagFor()` in
+`plugin.cpp` maps a container to its tag.
+
 ## Config (`quyen19492-item-sorting.toml`)
 
 D2RLoader creates `<scope>/d2rloader/config/quyen19492-item-sorting.toml` from
@@ -1232,7 +1242,7 @@ game):
    `StashTools` strip); the stash/cube positions are from the mod's own layout
    files. Adjust `InventoryToolshd.json` / the `Strip` constants in
    `patch_mod_stash_layout.py` if anything overlaps.
-2. The scan log line (`[personal_stash] scanned N item(s) [page P: N]`):
+2. The scan log line (`[personal-stash] scanned N item(s) [page P: N]`):
    Reimagined's Gems / Materials / Runes stash tabs hold items too. If they
    are reported as `PersonalStash` items on another inventory page, the sort
    **refuses** (toast + log) rather than risk pulling them into the grid --
