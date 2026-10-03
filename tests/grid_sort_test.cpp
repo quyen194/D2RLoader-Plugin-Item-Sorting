@@ -1,5 +1,6 @@
 // Linux/any-compiler test harness for the single-grid engine (grid_sort.*),
-// its TOML reader (grid_config_toml.hpp) and the misc-item classification.
+// its TOML reader (grid_config_toml.hpp), the misc-item classification and the
+// toast layout's widget names.
 // No PluginSDK needed. Build and run from the repo root, e.g.:
 //
 //   g++ -std=c++20 -O1 -I src -I <dir containing toml++/toml.hpp>
@@ -15,6 +16,7 @@
 #include "item_classification.hpp"
 #include "item_misc_data.hpp"
 #include "sort_engine.hpp"
+#include "ui_layouts.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -253,6 +255,26 @@ anchor = "middle"
 	CHECK(parsed.warnings.size() == 1, "expected 1 warning, got %zu", parsed.warnings.size());
 }
 
+// plugin.cpp shows toast messages by widget name, so the static toast layout
+// in the companion mpq must contain every name ui_layouts.hpp can hand out.
+static void TestToastLayoutWidgets() {
+	namespace UiLayouts = ItemSorting::UiLayouts;
+	const std::string text = ReadFile("d2rl-quyen19492-item-sorting.mpq/data/global/ui/layouts/quyen19492-item-sorting/Toasthd.json");
+	CHECK(!text.empty(), "run from the repo root");
+	const auto hasWidget = [&](const std::string& name) {
+		return text.find("\"name\": \"" + name + "\"") != std::string::npos;
+	};
+	for (uint32_t i = 0; i < static_cast<uint32_t>(UiLayouts::OutcomeMessage::Count); ++i) {
+		const char* name = UiLayouts::OutcomeMessageWidgetName(static_cast<UiLayouts::OutcomeMessage>(i));
+		CHECK(hasWidget(name), "Toasthd.json lacks widget %s", name);
+	}
+	for (uint32_t t = 0; t <= UiLayouts::kMaxDisplayableTab + 1; ++t) {
+		const std::string name = UiLayouts::TabWidgetName(t);
+		CHECK(hasWidget(name), "Toasthd.json lacks widget %s", name.c_str());
+	}
+	CHECK(text.find("\"name\": \"quyen19492-item-sorting/Toast\"") != std::string::npos, "Toasthd.json root name");
+}
+
 static void TestValidation() {
 	Grid::Config cfg = Grid::DefaultConfig("personal_stash");
 	cfg.layout[1].modeIds = { "rune" }; // duplicate of entry 1
@@ -456,6 +478,7 @@ static void TestRandomized() {
 int main(int argc, char** argv) {
 	TestShippedConfig();
 	TestValidation();
+	TestToastLayoutWidgets();
 	TestMiscClassification();
 	if (argc > 1) TestModFolderParity(argv[1]);
 	TestScenarios();

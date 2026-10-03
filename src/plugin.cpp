@@ -56,7 +56,6 @@ const InventoryService*   g_inventory    = nullptr;
 const ItemService*        g_items        = nullptr;
 const ThreadService*      g_threads      = nullptr;
 const PanelService*       g_panels       = nullptr;
-const ResourceService*    g_resources    = nullptr;
 const WidgetService*      g_widgets      = nullptr;
 const SharedEventService* g_sharedEvents = nullptr;
 
@@ -1814,8 +1813,6 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderGetPluginInfo() noexcept -> const PluginInfo* {
 }
 
 D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexcept -> bool {
-	namespace UiLayouts = ItemSorting::UiLayouts;
-
 	if (context == nullptr) {
 		return false;
 	}
@@ -1840,10 +1837,6 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 		context->LogError("quyen19492-item-sorting: PanelService is unavailable.");
 		return false;
 	}
-	if (context->QueryService(&g_resources) != ServiceQueryResult::Success || !HasResourceServiceField(g_resources, ResourceServiceRequiredSize)) {
-		context->LogError("quyen19492-item-sorting: ResourceService is unavailable.");
-		return false;
-	}
 	if (context->QueryService(&g_widgets) != ServiceQueryResult::Success || !HasWidgetServiceField(g_widgets, WidgetServiceRequiredSize)) {
 		context->LogError("quyen19492-item-sorting: WidgetService is unavailable.");
 		return false;
@@ -1866,20 +1859,8 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 	g_addPageEnabled.store(g_config.addPageEnabled);
 	g_removePageEnabled.store(g_config.removePageEnabled);
 
-	// Toast panel (built at runtime -- see ui_layouts.hpp).
-	const std::string toastJson = UiLayouts::BuildToastLayoutJson();
-	const Resources::ResourceRegistration toastResource {
-		.structSize = Resources::ResourceRegistrationSize,
-		.path       = "data/global/ui/layouts/quyen19492-item-sorting/Toasthd.json",
-		.bytes      = toastJson.data(),
-		.byteCount  = toastJson.size(),
-	};
-	Resources::RegistrationHandle toastResourceHandle = Resources::InvalidHandle;
-	if (g_resources->registerResource(context, &toastResource, &toastResourceHandle) != Resources::Result::Success) {
-		context->LogError("quyen19492-item-sorting: could not register the toast layout resource.");
-		return false;
-	}
-
+	// Toast panel. Its layout is data/global/ui/layouts/quyen19492-item-sorting/
+	// Toasthd.json in the companion mpq -- see ui_layouts.hpp.
 	const Panels::PanelRegistration toastRegistration {
 		.structSize = Panels::PanelRegistrationSize,
 		.flags      = Panels::PanelFlags::CloseOnEscape,

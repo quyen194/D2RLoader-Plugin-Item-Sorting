@@ -1,13 +1,14 @@
 #pragma once
 
-// JSON panel/child-layout sources for the Quyen19492 Item Sorting plugin.
+// UI layout notes and the widget names plugin.cpp shares with the companion
+// mpq layouts of the Quyen19492 Item Sorting plugin.
 //
 // Design note (v1 scope, see README "Known gaps" -- flagged for sign-off):
 // D2RLPlugin::WidgetService has no "set widget text" call (only
 // getInputText, which reads InputTextBoxWidget content, and
 // setWidgetVisible/setWidgetEnabled). There is therefore no supported way to
 // push freshly-computed text (an item count, an error detail) into an
-// already-registered JSON widget at runtime. The toast panel below works
+// already-registered JSON widget at runtime. The toast panel (Toasthd.json) works
 // around this the only way the SDK allows: every possible message is a
 // separate TextBoxWidget baked into the JSON up front, and showing a result
 // means calling setWidgetVisible(true) on exactly one of them (and false on
@@ -52,9 +53,12 @@ inline constexpr const char* kPluginId = "quyen19492-item-sorting";
 // ---------------------------------------------------------------------
 // Toast panel: the plugin's own result notification, per the user's explicit
 // choice of "plugin's own panel/toast" over D2RLoader's console or the D2R
-// chat box (see README). Built at runtime because of the enumerated
-// tab-number widgets (see file comment above); the outcome-message names and
-// the tab-number range are shared with plugin.cpp so the two stay in sync.
+// chat box (see README). The layout itself is a static file in the companion
+// mpq: d2rl-quyen19492-item-sorting.mpq/data/global/ui/layouts/
+// quyen19492-item-sorting/Toasthd.json. It must contain one hidden
+// TextBoxWidget per OutcomeMessageWidgetName() and per TabWidgetName(0..
+// kMaxDisplayableTab+1); plugin.cpp finds them by these names, and
+// tests/grid_sort_test.cpp checks the file has every one of them.
 
 enum class OutcomeMessage : uint32_t {
 	AutoSortOk = 0,
@@ -116,82 +120,6 @@ inline constexpr uint32_t kMaxDisplayableTab = 23;
 
 inline std::string TabWidgetName(uint32_t tab) {
 	return tab <= kMaxDisplayableTab ? ("MsgTab" + std::to_string(tab)) : std::string("MsgTabOverflow");
-}
-
-// Builds the full toast panel JSON, including one TextBoxWidget per
-// OutcomeMessage and one per displayable tab number (all hidden by default;
-// plugin.cpp shows exactly one from each group before opening the panel).
-inline std::string BuildToastLayoutJson() {
-	std::string json;
-	json.reserve(16 * 1024);
-	json += R"json({
-	"type": "Panel", "name": "quyen19492-item-sorting/Toast",
-	"fields": { "anchor": { "x": 0.5, "y": 0.22 }, "priority": 9000 },
-	"children": [
-		{
-			"type": "ImageWidget", "name": "Frame",
-			"fields": { "rect": { "x": -320, "y": -70 }, "filename": "Panel\\Modals\\Modal_No_Title_BG" },
-			"children": [
-				{
-					"type": "TextBoxWidget", "name": "Heading",
-					"fields": {
-						"rect": { "x": 24, "y": 14, "width": 592, "height": 30 },
-						"text": "@quyen19492-item-sorting:ToastTitle", "style": "$StyleSettingsTitle"
-					}
-				},
-)json";
-
-	for (uint32_t i = 0; i < static_cast<uint32_t>(OutcomeMessage::Count); ++i) {
-		const auto msg      = static_cast<OutcomeMessage>(i);
-		const char* widgetName = OutcomeMessageWidgetName(msg);
-		json += "\t\t\t\t{ \"type\": \"TextBoxWidget\", \"name\": \"";
-		json += widgetName;
-		json += "\", \"fields\": { \"rect\": { \"x\": 24, \"y\": 52, \"width\": 592, \"height\": 60 }, \"visible\": false, "
-		        "\"text\": \"@";
-		json += kPluginId;
-		json += ":";
-		// The widget name doubles as its strings.json Key -- see
-		// d2rl-quyen19492-item-sorting.mpq/data/local/lng/strings/d2rloader/
-		// quyen19492-item-sorting/strings.json (one entry per OutcomeMessage,
-		// named to match OutcomeMessageWidgetName exactly).
-		json += widgetName;
-		json += "\", \"style\": \"$StyleModalDialogDescription\" } },\n";
-	}
-
-	// Not localized/string-table-backed like the OutcomeMessage loop above --
-	// this is a bare number with an English "Selected tab: " prefix, and
-	// enumerating kMaxDisplayableTab+2 string-table keys just for that
-	// prefix isn't worth it. Revisit if that changes.
-	for (uint32_t t = 0; t <= kMaxDisplayableTab + 1; ++t) {
-		const bool  overflow = t == kMaxDisplayableTab + 1;
-		std::string label    = overflow ? "Selected tab: 24+" : ("Selected tab: " + std::to_string(t));
-		json += "\t\t\t\t{ \"type\": \"TextBoxWidget\", \"name\": \"";
-		json += overflow ? std::string("MsgTabOverflow") : TabWidgetName(t);
-		json += "\", \"fields\": { \"rect\": { \"x\": 24, \"y\": 100, \"width\": 300, \"height\": 26 }, \"visible\": false, "
-		        "\"text\": \"";
-		json += label;
-		json += "\", \"style\": \"$StyleModalDialogDescription\" } },\n";
-	}
-
-	json += R"json(
-				{
-					"type": "ButtonWidget", "name": "CloseButton",
-					"fields": {
-						"rect": { "x": 260, "y": 132 },
-						"filename": "Panel\\Modals\\ModalButton",
-						"focusIndicatorFilename": "Controller/HoverImages/ModalButton_Hover",
-						"pressedFrame": 1, "disabledFrame": 2, "hoveredFrame": 3,
-						"textString": "@d2r:strClose",
-						"pointSize": "$MediumFontSize",
-						"textColor": "$FontColorWhite",
-						"onClickMessage": "PanelManager:ClosePanel:quyen19492-item-sorting/Toast"
-					}
-				}
-			]
-		}
-	]
-})json";
-	return json;
 }
 
 }

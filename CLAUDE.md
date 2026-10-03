@@ -42,7 +42,7 @@ src/item_misc_data.hpp       GENERATED (tools/gen_misc_classification.py)
 src/mod_item_data.*          Runtime parse of the mod's own txt files (mod_data_path)
 src/grid_sort.*              Single-grid sort (personal stash / inventory / cube), pure
 src/grid_config_toml.hpp     TOML -> Grid::Config
-src/ui_layouts.hpp           Button-strip / toast layout JSON
+src/ui_layouts.hpp           Toast widget names shared with the mpq Toasthd.json
 src/plugin.cpp               SDK entry points, service wiring, thread hops, UI listener
 d2rl-quyen19492-item-sorting.mpq/   Companion resources (layouts, sprites, strings)
 tools/                       Generators + patch_mod_stash_layout.py

@@ -1,0 +1,78 @@
+{
+	"type": "Panel", "name": "quyen19492-item-sorting/Toast",
+	"fields": { "anchor": { "x": 0.5, "y": 0.5 }, "priority": 9000 },
+	"children": [
+		{
+			"type": "ImageWidget", "name": "Frame",
+			"fields": { "rect": { "x": -627, "y": -225 }, "filename": "Panel\\Modals\\Modal_No_Title_BG" },
+			"children": [
+				{
+					"type": "TextBoxWidget", "name": "Heading",
+					"fields": {
+						"rect": { "x": 78, "y": 45, "width": 1098, "height": 60 },
+						"text": "@quyen19492-item-sorting:ToastTitle", "style": "$StyleSettingsTitle"
+					}
+				},
+				{ "type": "TextBoxWidget", "name": "MsgAutoSortOk", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgAutoSortOk", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgAutoSortDisabled", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgAutoSortDisabled", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgAutoSortNotEnoughTabs", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgAutoSortNotEnoughTabs", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgAutoSortNoRoom", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgAutoSortNoRoom", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgAutoSortSetNoRoom", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgAutoSortSetNoRoom", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgAutoSortUnknownMode", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgAutoSortUnknownMode", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgBlankMoved", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgBlankMoved", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgNoBlankTab", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgNoBlankTab", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgPageRemoved", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgPageRemoved", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgCurrentNotEmpty", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgCurrentNotEmpty", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgOutOfRange", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgOutOfRange", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgMultiplayerClientUnsupported", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgMultiplayerClientUnsupported", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTabSelected", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgTabSelected", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgPageUnknown", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgPageUnknown", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgInternalError", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgInternalError", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgGridSortOk", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgGridSortOk", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgGridSortDisabled", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgGridSortDisabled", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgGridSortConfigError", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgGridSortConfigError", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgGridSortNoRoom", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgGridSortNoRoom", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgGridSortRejected", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgGridSortRejected", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgGridSortTooFull", "fields": { "rect": { "x": 78, "y": 115, "width": 1098, "height": 120 }, "visible": false, "text": "@quyen19492-item-sorting:MsgGridSortTooFull", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab0", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 0", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab1", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 1", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab2", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 2", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab3", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 3", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab4", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 4", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab5", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 5", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab6", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 6", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab7", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 7", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab8", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 8", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab9", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 9", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab10", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 10", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab11", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 11", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab12", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 12", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab13", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 13", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab14", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 14", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab15", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 15", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab16", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 16", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab17", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 17", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab18", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 18", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab19", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 19", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab20", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 20", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab21", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 21", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab22", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 22", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTab23", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 23", "style": "$StyleModalDialogDescription" } },
+				{ "type": "TextBoxWidget", "name": "MsgTabOverflow", "fields": { "rect": { "x": 78, "y": 235, "width": 1098, "height": 40 }, "visible": false, "text": "Selected tab: 24+", "style": "$StyleModalDialogDescription" } },
+				{
+					"type": "ButtonWidget", "name": "CloseButton",
+					"fields": {
+						"rect": { "x": 360, "y": 300 },
+						"filename": "Panel\\Modals\\ModalButton",
+						"focusIndicatorFilename": "Controller/HoverImages/ModalButton_Hover",
+						"pressedFrame": 1, "disabledFrame": 2, "hoveredFrame": 3,
+						"textString": "@d2r:strClose",
+						"pointSize": "$MediumFontSize",
+						"textColor": "$FontColorWhite",
+						"onClickMessage": "PanelManager:ClosePanel:quyen19492-item-sorting/Toast"
+					}
+				}
+			]
+		}
+	]
+}

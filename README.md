@@ -94,10 +94,11 @@ src/
   grid_sort.hpp / .cpp          Single-grid sort (personal stash, inventory,
                                  cube): pure algorithm, PlanSort().
   grid_config_toml.hpp          TOML -> Grid::Config for those sections.
-  ui_layouts.hpp                Child-layout button-strip JSON (compile-time
-                                 constant) and the toast panel JSON (built at
-                                 runtime -- see "No dynamic widget text"
-                                 below for why).
+  ui_layouts.hpp                Button/layout notes and the toast's widget
+                                 names (OutcomeMessage, tab readout) that
+                                 plugin.cpp shares with the static
+                                 Toasthd.json in the companion mpq -- see
+                                 "No dynamic widget text" below.
   plugin.cpp                    Phase 2: D2RLoaderGetPluginInfo /
                                  D2RLoaderLoadPlugin / D2RLoaderUnloadPlugin,
                                  service wiring, thread hops, the UI message
@@ -128,7 +129,7 @@ button on the inventory panel that manipulates shared-stash items) but
 relies heavily on `InstallInlineHook` / raw native pointers to read and
 write D2R's internal stash state. This plugin deliberately avoids that:
 everything here goes through `InventoryService`, `ItemService`,
-`PanelService`, `ResourceService`, `WidgetService`, `SharedEventService`,
+`PanelService`, `WidgetService`, `SharedEventService`,
 and `ThreadService` -- all of which the SDK documents as stable, versioned,
 ABI-checked surfaces. The tradeoff is that a few things RuffnecKk's suite
 can read directly from memory (which tab is on screen, how many tabs exist)
@@ -627,7 +628,10 @@ here for review, same as the algorithm-level scope note below.
    push freshly-computed text (an item count, a specific error detail) into
    an already-registered JSON widget at runtime. The toast works around
    this by baking every possible outcome message into its own
-   `TextBoxWidget` up front (see `ui_layouts.hpp`) and showing a result by
+   `TextBoxWidget` up front (the static
+   `data/global/ui/layouts/quyen19492-item-sorting/Toasthd.json` in the
+   companion mpq, whose widget names come from `ui_layouts.hpp`; the test
+   suite checks every name is present) and showing a result by
    toggling visibility, not by setting text -- so it can only show one of a
    fixed set of canned messages, never an exact item/tab count. Exact
    counts go to the plugin's log file (`PluginContext::LogInfo`) instead.
@@ -710,7 +714,11 @@ here for review, same as the algorithm-level scope note below.
    text, and toast wording -- now lives in `d2rl-quyen19492-item-sorting.mpq/`
    as editable JSON, not baked into the DLL; only genuinely dynamic
    structure (which toast widgets are visible, which tab number is shown)
-   still goes through C++. `strings.json` currently only has an `enUS` entry
+   still goes through C++. Later still, the toast layout itself moved out of
+   C++ too: `BuildToastLayoutJson()` and its `registerResource` call are
+   gone, and the panel is a plain `Toasthd.json` file in the companion mpq
+   (found by `registerPanel("Toast")` like the `Action*` panels), so its
+   coordinates can be tweaked without rebuilding the DLL. `strings.json` currently only has an `enUS` entry
    per key -- add the other language columns `d2rl-charm-inv`'s own
    `strings.json` uses (`zhTW`, `deDE`, `esES`, `frFR`, `itIT`, `koKR`,
    `plPL`, `esMX`, `jaJP`, `ptBR`, `ruRU`, `zhCN`) whenever this plugin is
