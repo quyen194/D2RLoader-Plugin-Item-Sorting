@@ -71,7 +71,8 @@ first.
   "Single-grid sorting" below.
 - Results show in the plugin's own toast panel, per your explicit choice of
   "the plugin's own panel/toast" over D2RLoader's console or the D2R chat
-  box.
+  box. `[item-sorting] notification_enabled = false` turns the toast off
+  entirely (results still go to the log).
 
 ## Architecture
 
@@ -190,7 +191,7 @@ reference. Structure:
 
 | Section | Holds | Read |
 | --- | --- | --- |
-| `[item-sorting]` | plugin-wide: `enabled` (master switch -- false registers nothing), `notification_*`, `debug_log_ui_messages`, `mod_data_path` | once, at game start |
+| `[item-sorting]` | plugin-wide: `enabled` (master switch -- false registers nothing), `notification_*`, `debug_log_ui_messages`, `mod_data_path` | once, at game start -- except `notification_enabled`, re-read on every button press and whenever the stash opens |
 | `[item-sorting.shared_stash]` + `[[...shared_stash.layout]]` | shared stash: its own `enabled`, `add_page_enabled`, `remove_page_enabled`, `grid_width`/`grid_height`, `shared_stash_tab_count`, `start_tab`, `blank_tabs_at_start`, `compact_empty_tabs_first`, `add_empty_page_when`, the category list | on every Auto Sort / Add Page / Remove Page press; `enabled` and the two page toggles also whenever the stash opens (to show/hide the buttons) |
 | `[item-sorting.personal_stash]` / `.inventory` / `.cube` | single-grid sorting (see "Single-grid sorting") | on every Sort press |
 
@@ -244,8 +245,8 @@ The settings you're most likely to need to change:
   to have the plugin parse that mod's own txt files fresh, every Auto Sort
   run, instead. Falls back to the embedded table with a log warning if the
   path or its files can't be read. See "Known gaps" #3 for why this exists.
-- Everything outside the plugin-wide `[item-sorting]` block
-  re-reads from disk on every button press (see the table above) -- edit and
+- Everything outside the plugin-wide `[item-sorting]` block (plus its
+  `notification_enabled`) re-reads from disk on every button press (see the table above) -- edit and
   save the file, then press the button again, no game restart needed. See
   "Known gaps" #14.
 

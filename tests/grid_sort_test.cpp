@@ -208,7 +208,7 @@ static void TestShippedConfig() {
 	{
 		const auto* top = root["item-sorting"].as_table();
 		CHECK(top != nullptr, "[item-sorting] exists");
-		const std::set<std::string> allowedTop = { "enabled", "notification_channel", "notification_seconds", "debug_log_ui_messages",
+		const std::set<std::string> allowedTop = { "enabled", "notification_enabled", "notification_channel", "notification_seconds", "debug_log_ui_messages",
 			"mod_data_path", "shared_stash", "personal_stash", "inventory", "cube" };
 		for (auto&& [k, v] : *top) {
 			(void)v;

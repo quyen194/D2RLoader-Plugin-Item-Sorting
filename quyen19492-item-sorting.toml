@@ -13,7 +13,7 @@
 #
 # ── What reloads when, without restarting the game ─────────────────────────
 #   Read ONCE, when the game starts (restart to change):
-#     everything in this [item-sorting] block.
+#     everything in this [item-sorting] block except notification_enabled.
 #   Read again while you play:
 #     every section below it. Each button press re-reads its own section
 #     (the shared-stash buttons also re-read `enabled`, `add_page_enabled`
@@ -28,6 +28,11 @@
 # once at game start. To switch off just one container while playing, use
 # that section's own `enabled` instead.
 enabled = true
+
+# Show a notification after any button finishes -- true | false. false: no
+# toast ever opens; results still go to the plugin's log file. Re-read on
+# every button press (and whenever the stash opens) -- no restart needed.
+notification_enabled = true
 
 # Notification style after any button finishes. The only accepted value right
 # now is "toast", which shows the plugin's own toast panel with a Close

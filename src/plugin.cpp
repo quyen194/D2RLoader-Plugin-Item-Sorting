@@ -137,6 +137,10 @@ std::atomic<bool> g_removePageEnabled { true };
 // shared-stash buttons and ignores their actions. Same refresh path as the two
 // flags above; the game-thread actions also re-check it from a fresh read.
 std::atomic<bool> g_sharedStashEnabled { true };
+// [item-sorting] notification_enabled, read by ShowToast on the UI thread.
+// Hot-reloaded like the flags above: every action's fresh config read and
+// every stash open store it, so an edit applies from the next button press.
+std::atomic<bool> g_notificationEnabled { true };
 SharedEvents::ListenerHandle g_tooltipListener = SharedEvents::InvalidHandle;
 
 struct Config {
@@ -158,6 +162,10 @@ struct Config {
 	// watching the log while toggling it in-game. Off by default -- this is
 	// a firehose, not something to leave on.
 	bool                                        debugLogUiMessages = false;
+	// [item-sorting] notification_enabled: false = never open the toast panel
+	// (results still go to the log). Unlike the rest of [item-sorting] it is
+	// hot-reloaded -- see g_notificationEnabled.
+	bool                                        notificationEnabled = true;
 
 	// Show + allow the shared-stash Add Page / Remove Page buttons. See
 	// g_addPageEnabled above.
@@ -322,6 +330,7 @@ Config LoadConfig(const PluginContext* ctx) {
 	auto section = parsed["item-sorting"];
 	cfg.enabled            = section["enabled"].value_or(true);
 	cfg.debugLogUiMessages = section["debug_log_ui_messages"].value_or(false);
+	cfg.notificationEnabled = section["notification_enabled"].value_or(true);
 
 	// Keys that used to live directly under [item-sorting] before the
 	// shared stash got its own section. An older config file would otherwise
@@ -930,7 +939,7 @@ auto ApplyMoves(
 
 void ShowToast(const PluginContext* ctx, ItemSorting::UiLayouts::OutcomeMessage message) {
 	namespace UiLayouts = ItemSorting::UiLayouts;
-	if (ctx == nullptr || g_panels == nullptr || g_widgets == nullptr) {
+	if (ctx == nullptr || g_panels == nullptr || g_widgets == nullptr || !g_notificationEnabled.load()) {
 		return;
 	}
 	if (g_panels->openPanel(ctx, g_toastPanel) != Panels::Result::Success) {
@@ -998,7 +1007,8 @@ void QueueToast(const PluginContext* ctx, ItemSorting::UiLayouts::OutcomeMessage
 
 // Hot reload for the three shared-stash actions: re-read the config file and
 // take the whole [item-sorting.shared_stash] section (the
-// plugin-wide [item-sorting] block is load-time only). Runs on the
+// plugin-wide [item-sorting] block is load-time only, except
+// notification_enabled). Runs on the
 // game thread, like every action, so g_config is never read mid-update by
 // another action. Returns the fresh shared_stash `enabled`.
 bool RefreshSharedStashConfig(const PluginContext* ctx) {
@@ -1017,6 +1027,7 @@ bool RefreshSharedStashConfig(const PluginContext* ctx) {
 	g_sharedStashEnabled.store(fresh.sharedEnabled);
 	g_addPageEnabled.store(fresh.addPageEnabled);
 	g_removePageEnabled.store(fresh.removePageEnabled);
+	g_notificationEnabled.store(fresh.notificationEnabled);
 	if (!fresh.sharedEnabled) {
 		ctx->LogInfo("[remote-stash] shared-stash action skipped -- [item-sorting.shared_stash] enabled = false.");
 	}
@@ -1442,6 +1453,7 @@ void __cdecl DoSortGrid(const PluginContext* ctx, void* userData) noexcept {
 	}
 
 	const Config fresh = LoadConfig(ctx);
+	g_notificationEnabled.store(fresh.notificationEnabled);
 	if (!fresh.fileError.empty()) {
 		ctx->LogWarn((tag + "sort skipped -- quyen19492-item-sorting.toml is not valid TOML: " + fresh.fileError).c_str());
 		QueueToast(ctx, UiLayouts::OutcomeMessage::GridSortConfigError);
@@ -1666,8 +1678,8 @@ bool FindStashButton(const PluginContext* ctx, Widgets::WidgetHandle panel, cons
 	return g_widgets->findWidget(ctx, current, name, out) == Widgets::Result::Success;
 }
 
-// Re-reads only add_page_enabled / remove_page_enabled (not the whole
-// LoadConfig, which also reloads the classification tables). UI thread.
+// Re-reads only the shared-stash toggles and notification_enabled (not the
+// whole LoadConfig, which also reloads the classification tables). UI thread.
 void RefreshPageButtonToggles(const PluginContext* ctx) {
 	std::string text;
 	if (!ReadConfigText(ctx, &text)) {
@@ -1683,6 +1695,7 @@ void RefreshPageButtonToggles(const PluginContext* ctx) {
 	g_sharedStashEnabled.store(shared["enabled"].value_or(true));
 	g_addPageEnabled.store(shared["add_page_enabled"].value_or(true));
 	g_removePageEnabled.store(shared["remove_page_enabled"].value_or(true));
+	g_notificationEnabled.store(parsed["item-sorting"]["notification_enabled"].value_or(true));
 }
 
 void ApplyPageButtonVisibility(const PluginContext* ctx) {
@@ -1927,6 +1940,7 @@ D2RL_PLUGIN_EXPORT auto D2RLoaderLoadPlugin(const PluginContext* context) noexce
 	g_sharedStashEnabled.store(g_config.sharedEnabled);
 	g_addPageEnabled.store(g_config.addPageEnabled);
 	g_removePageEnabled.store(g_config.removePageEnabled);
+	g_notificationEnabled.store(g_config.notificationEnabled);
 
 	// Toast panel. Its layout is data/global/ui/layouts/quyen19492-item-sorting/
 	// Toasthd.json in the companion mpq -- see ui_layouts.hpp.
