@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-namespace Quyen194ItemSorting {
+namespace ItemSorting {
 
 inline constexpr uint32_t kUnknownTab = (std::numeric_limits<uint32_t>::max)();
 

@@ -22,9 +22,9 @@ cube layouts have the same widgets (the patch script tells you if not).
 
 ```
 d2rloader/
-  plugins/d2rl-quyen194-item-sorting.dll      the plugin
-  plugins/d2rl-quyen194-item-sorting.mpq/     its resources (button icons, texts, layouts)
-  config/quyen194-item-sorting.toml           default settings
+  plugins/d2rl-quyen19492-item-sorting.dll      the plugin
+  plugins/d2rl-quyen19492-item-sorting.mpq/     its resources (button icons, texts, layouts)
+  config/quyen19492-item-sorting.toml           default settings
 patch_mod_stash_layout.py                     adds the stash / cube buttons to your mod
 README.md                                     this file
 ```
@@ -34,7 +34,7 @@ README.md                                     this file
 1. **Close the game.**
 2. **Copy the `d2rloader` folder into your game folder** (the one containing
    `D2R.exe`), merging it with the `d2rloader` folder already there.
-   - Already have a `d2rloader/config/quyen194-item-sorting.toml` from an
+   - Already have a `d2rloader/config/quyen19492-item-sorting.toml` from an
      earlier version? Back it up first -- this copy replaces it. Then move your
      own values into the new file (section names changed in this version:
      everything is under `[item-sorting]`, `[item-sorting.shared_stash]`,
@@ -44,6 +44,12 @@ README.md                                     this file
    - Upgrading from the old `remote-stash-sorting` plugin? Delete
      `d2rl-remote-stash-sorting.dll`, the `d2rl-remote-stash-sorting.mpq`
      folder and `remote-stash-sorting.toml`, or both plugins load.
+   - Upgrading from `quyen194-item-sorting` (the previous name of this
+     plugin)? Delete `d2rl-quyen194-item-sorting.dll`, the
+     `d2rl-quyen194-item-sorting.mpq` folder and
+     `config/quyen194-item-sorting.toml` (copy your settings into
+     `quyen19492-item-sorting.toml` first), then re-run step 3 -- the old
+     buttons point at the old name and stop working until it is re-run.
 3. **Add the stash / cube buttons to your mod** (the inventory button needs
    nothing -- the plugin adds it by itself). D2RLoader plugins cannot add
    buttons to the stash or cube panels, but your mod's own layout files can,
@@ -73,7 +79,7 @@ README.md                                     this file
 
 ## Settings
 
-Edit `d2rloader/config/quyen194-item-sorting.toml`. Every setting is explained
+Edit `d2rloader/config/quyen19492-item-sorting.toml`. Every setting is explained
 in the file itself.
 
 - `[item-sorting]` -- plugin-wide (`enabled` switches the whole plugin off).
@@ -102,20 +108,20 @@ a message saying so and nothing is moved.
 
 ## Troubleshooting
 
-- The plugin writes `d2rloader/logs/quyen194-item-sorting.log`. Every button
+- The plugin writes `d2rloader/logs/quyen19492-item-sorting.log`. Every button
   press logs what it read, what it planned and what happened, and every
   config problem is listed there with the exact key.
 - **No buttons in the stash or cube:** step 3 was not run, or the mod was
   updated since. Run `patch_mod_stash_layout.py --check`.
 - **No button in the inventory:** look for `inventory Sort button registered`
   in the log. Another inventory plugin can cover it; the position is in
-  `d2rloader/plugins/d2rl-quyen194-item-sorting.mpq/data/global/ui/layouts/quyen194-item-sorting/InventoryToolshd.json`.
+  `d2rloader/plugins/d2rl-quyen19492-item-sorting.mpq/data/global/ui/layouts/quyen19492-item-sorting/InventoryToolshd.json`.
 - **"invalid settings" message:** the log names the key and the problem.
 - A sort that cannot be done safely moves nothing at all.
 
 ## Uninstall
 
 1. `python patch_mod_stash_layout.py "<mod.mpq folder>" --remove`
-2. Delete `d2rloader/plugins/d2rl-quyen194-item-sorting.dll`, the
-   `d2rloader/plugins/d2rl-quyen194-item-sorting.mpq` folder and
-   `d2rloader/config/quyen194-item-sorting.toml`.
+2. Delete `d2rloader/plugins/d2rl-quyen19492-item-sorting.dll`, the
+   `d2rloader/plugins/d2rl-quyen19492-item-sorting.mpq` folder and
+   `d2rloader/config/quyen19492-item-sorting.toml`.

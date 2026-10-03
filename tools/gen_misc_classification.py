@@ -139,7 +139,7 @@ def main() -> int:
         '#include "sort_engine.hpp"',
         "#include <cstdint>",
         "",
-        "namespace Quyen194ItemSorting::Classification {",
+        "namespace ItemSorting::Classification {",
         "",
         "struct MiscEntry {",
         "\tuint32_t code; // packed 4-byte item code, ascending, for binary search",
@@ -155,7 +155,7 @@ def main() -> int:
     for packed in sorted(entries):
         code, kind, order, grade, w, h = entries[packed]
         lines.append(f"\t{{ 0x{packed:08X}U, MiscKind::{kind}, {order}u, {grade}u, {w}u, {h}u }}, // {code}")
-    lines += ["};", "", "} // namespace Quyen194ItemSorting::Classification", ""]
+    lines += ["};", "", "} // namespace ItemSorting::Classification", ""]
     OUT.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     print(f"wrote {OUT} with {len(entries)} entries")
     return 0

@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-namespace Quyen194ItemSorting::Classification::ModData {
+namespace ItemSorting::Classification::ModData {
 
 struct LoadedTable {
 	// Sorted ascending by `code`, same invariant as the embedded kTable, so

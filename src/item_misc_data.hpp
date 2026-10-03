@@ -9,7 +9,7 @@
 #include "sort_engine.hpp"
 #include <cstdint>
 
-namespace Quyen194ItemSorting::Classification {
+namespace ItemSorting::Classification {
 
 struct MiscEntry {
 	uint32_t code; // packed 4-byte item code, ascending, for binary search
@@ -249,4 +249,4 @@ inline constexpr MiscEntry kMiscTable[226] = {
 	{ 0x207A7978U, MiscKind::Quest, 0u, 0u, 1u, 1u }, // xyz
 };
 
-} // namespace Quyen194ItemSorting::Classification
+} // namespace ItemSorting::Classification

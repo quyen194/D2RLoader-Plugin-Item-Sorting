@@ -26,7 +26,7 @@
 #include <string>
 #include <vector>
 
-using namespace Quyen194ItemSorting;
+using namespace ItemSorting;
 
 static int g_failures = 0;
 #define CHECK(cond, ...)                                                        \
@@ -173,7 +173,7 @@ static std::string ReadFile(const std::string& path) {
 }
 
 static void TestShippedConfig() {
-	const std::string text = ReadFile("quyen194-item-sorting.toml");
+	const std::string text = ReadFile("quyen19492-item-sorting.toml");
 	CHECK(!text.empty(), "run from the repo root");
 	toml::table root = toml::parse(text);
 	for (const char* section : { "personal_stash", "inventory", "cube" }) {

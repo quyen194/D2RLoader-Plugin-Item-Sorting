@@ -25,7 +25,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Quyen194ItemSorting::Grid {
+namespace ItemSorting::Grid {
 
 struct ParsedSection {
 	bool                     enabled = true;

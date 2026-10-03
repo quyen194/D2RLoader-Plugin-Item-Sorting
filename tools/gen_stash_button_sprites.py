@@ -27,7 +27,7 @@ from PIL import Image, ImageEnhance, ImageOps
 NAMES = ("autosort", "addpage", "removepage")
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_SRC = REPO / "assets" / "stash_buttons"
-DEFAULT_OUT = REPO / "d2rl-quyen194-item-sorting.mpq" / "data" / "hd" / "global" / "ui" / "d2rloader" / "quyen194-item-sorting"
+DEFAULT_OUT = REPO / "d2rl-quyen19492-item-sorting.mpq" / "data" / "hd" / "global" / "ui" / "d2rloader" / "quyen19492-item-sorting"
 
 
 def load_master(path: Path) -> Image.Image:

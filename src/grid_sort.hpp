@@ -19,7 +19,7 @@
 // plugin reads live items into ItemFacts, calls PlanSort(), and applies the
 // returned moves. PlannedMove::destTab is always 0 here.
 //
-// The config file's own comments (quyen194-item-sorting.toml, the
+// The config file's own comments (quyen19492-item-sorting.toml, the
 // personal_stash / inventory / cube sections) are the user-facing reference
 // for every setting below.
 
@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-namespace Quyen194ItemSorting::Grid {
+namespace ItemSorting::Grid {
 
 inline constexpr uint32_t kMaxGridSide = 16; // D2S item coordinates are 4 bits
 
@@ -77,7 +77,7 @@ struct Config {
 	std::vector<Entry>       layout;
 };
 
-// Built-in defaults, identical to the shipped quyen194-item-sorting.toml
+// Built-in defaults, identical to the shipped quyen19492-item-sorting.toml
 // sections. Used when a user's (older) config file has no such section --
 // D2RLoader never overwrites a config file the user already has.
 // section = "personal_stash" | "inventory" | "cube".

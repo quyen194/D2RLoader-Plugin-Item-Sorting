@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add the Quyen194 Item Sorting buttons to a mod's stash and cube layouts.
+"""Add the Quyen19492 Item Sorting buttons to a mod's stash and cube layouts.
 
 The D2RLoader PluginSDK can only attach a plugin child layout to
 StockPanel::PlayerInventory, and a plugin's companion MPQ may not override
@@ -30,8 +30,8 @@ mod's own layout files:
 (The inventory's Sort button needs no patch: the plugin adds it itself.)
 
 The buttons are icon sprites shipped in the plugin's companion MPQ
-(d2rloader/quyen194-item-sorting/stash_btn_*.sprite). Each button fires
-"PanelManager:TogglePanel:quyen194-item-sorting/Action<Name>", which the plugin
+(d2rloader/quyen19492-item-sorting/stash_btn_*.sprite). Each button fires
+"PanelManager:TogglePanel:quyen19492-item-sorting/Action<Name>", which the plugin
 turns into the matching action (see the g_action*Panel comment in plugin.cpp).
 
 Usage:
@@ -64,7 +64,7 @@ from pathlib import Path
 # Sprites ship in the plugin's companion MPQ (tools/gen_stash_button_sprites.py,
 # whose --size must match BUTTON_SIZE); frame order matches the native page
 # arrows: normal, hovered, pressed, disabled.
-SPRITE_DIR = "d2rloader/quyen194-item-sorting"
+SPRITE_DIR = "d2rloader/quyen19492-item-sorting"
 BUTTON_SIZE, BUTTON_GAP = 88, 8
 
 
@@ -103,13 +103,16 @@ class Strip:
 # y=1506..1599; the 16x13 grid starts at x=90 and ends above y=1506),
 # vertically centred on it. Coordinates are BankExpansionLayout-local, same
 # space as StashNavigation. Strips written before the plugin was renamed from
-# remote-stash-sorting to quyen194-item-sorting (strip v1/v2) are still
-# recognised so they get upgraded or removed instead of being left behind.
+# remote-stash-sorting (strip v1/v2) or while it was still called
+# quyen194-item-sorting (Quyen194ItemSorting* markers, which point at the old
+# panel / sprite / string ids) are still recognised so they get upgraded or
+# removed instead of being left behind. Versions were bumped with the
+# quyen19492 rename so every old strip counts as outdated.
 SHARED_STRIP = Strip(
     key="shared-stash",
-    marker_prefix="Quyen194ItemSortingStashButtons_v",
-    version=4,
-    legacy_prefixes=("Remote" + "StashSortingStashButtons_v",),
+    marker_prefix="Quyen19492ItemSortingStashButtons_v",
+    version=5,
+    legacy_prefixes=("Remote" + "StashSortingStashButtons_v", "Quyen194" + "ItemSortingStashButtons_v"),
     container="SharedStashTabContainer",
     position="first",
     x=110,
@@ -132,8 +135,9 @@ SHARED_STRIP = Strip(
 # both buttons, the plugin drops the personal sort (see DoSortGrid).
 PERSONAL_STRIP = Strip(
     key="personal-stash",
-    marker_prefix="Quyen194ItemSortingPersonalButtons_v",
-    version=2,
+    marker_prefix="Quyen19492ItemSortingPersonalButtons_v",
+    version=3,
+    legacy_prefixes=("Quyen194" + "ItemSortingPersonalButtons_v",),
     container="basicstash_container",
     position="first",
     x=SHARED_STRIP.x,
@@ -146,8 +150,9 @@ PERSONAL_STRIP = Strip(
 # y=708..1492), left of the native Transmute button (x=810, y=1564).
 CUBE_TAB_STRIP = Strip(
     key="stash-cube-tab",
-    marker_prefix="Quyen194ItemSortingCubeTabButtons_v",
-    version=1,
+    marker_prefix="Quyen19492ItemSortingCubeTabButtons_v",
+    version=2,
+    legacy_prefixes=("Quyen194" + "ItemSortingCubeTabButtons_v",),
     container="advancedstash_horadriccube",
     position="last",
     x=284,
@@ -161,8 +166,9 @@ CUBE_TAB_STRIP = Strip(
 # on the same row as the native Transmute button (x=1174, y=1046).
 CUBE_PANEL_STRIP = Strip(
     key="cube-panel",
-    marker_prefix="Quyen194ItemSortingCubeButtons_v",
-    version=1,
+    marker_prefix="Quyen19492ItemSortingCubeButtons_v",
+    version=2,
+    legacy_prefixes=("Quyen194" + "ItemSortingCubeButtons_v",),
     container="HoradricCubeLayout",
     position="last",
     x=120,
@@ -204,8 +210,8 @@ def build_block(strip: Strip, indent: str, nl: str) -> str:
             f'{i4}"hoveredFrame": 1,',
             f'{i4}"pressedFrame": 2,',
             f'{i4}"disabledFrame": 3,',
-            f'{i4}"tooltipString": "@quyen194-item-sorting:{tooltip}",',
-            f'{i4}"onClickMessage": "PanelManager:TogglePanel:quyen194-item-sorting/{action}"',
+            f'{i4}"tooltipString": "@quyen19492-item-sorting:{tooltip}",',
+            f'{i4}"onClickMessage": "PanelManager:TogglePanel:quyen19492-item-sorting/{action}"',
             f"{i3}}}",
             f"{i2}}}" + ("," if idx < len(strip.buttons) - 1 else ""),
         ]

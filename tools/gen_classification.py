@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates item_classification_data.hpp for the Quyen194ItemSorting plugin.
+"""Generates item_classification_data.hpp for the ItemSorting plugin.
 
 Ports the classification logic from D2R-Reimagined-Save-Editor/index.html:
   - buildItemTypeChains() / ITEM_ITYPE_CHAIN  (itemtypes.txt Equiv1/Equiv2 walk)
@@ -243,7 +243,7 @@ lines.append("")
 lines.append("#include \"sort_engine.hpp\"")
 lines.append("#include <cstdint>")
 lines.append("")
-lines.append("namespace Quyen194ItemSorting::Classification {")
+lines.append("namespace ItemSorting::Classification {")
 lines.append("")
 lines.append("struct ClassificationEntry {")
 lines.append("\tuint32_t    code; // packed 4-byte item code, ascending, for binary search")
@@ -279,7 +279,7 @@ for group in SET_GROUP_BY_ROW:
     lines.append(f'\t"{esc(group)}",')
 lines.append("};")
 lines.append("")
-lines.append("} // namespace Quyen194ItemSorting::Classification")
+lines.append("} // namespace ItemSorting::Classification")
 lines.append("")
 
 OUT.write_text("\n".join(lines), encoding="utf-8")

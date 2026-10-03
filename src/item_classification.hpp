@@ -18,7 +18,7 @@
 #include <optional>
 #include <string>
 
-namespace Quyen194ItemSorting::Classification {
+namespace ItemSorting::Classification {
 
 struct Facts {
 	GearSlot    gearSlot     = GearSlot::None;

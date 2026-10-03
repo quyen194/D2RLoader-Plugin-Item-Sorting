@@ -1,5 +1,5 @@
 {
-	"type": "Widget", "name": "quyen194-item-sorting/InventoryTools",
+	"type": "Widget", "name": "quyen19492-item-sorting/InventoryTools",
 	"fields": {
 		"rect": { "x": 956, "y": 1640, "width": 88, "height": 88 }
 	},
@@ -8,13 +8,13 @@
 			"type": "ButtonWidget", "name": "QisSortInventoryButton",
 			"fields": {
 				"rect": { "x": 0, "y": 0, "width": 88, "height": 88 },
-				"filename": "d2rloader/quyen194-item-sorting/stash_btn_autosort",
+				"filename": "d2rloader/quyen19492-item-sorting/stash_btn_autosort",
 				"normalFrame": 0,
 				"hoveredFrame": 1,
 				"pressedFrame": 2,
 				"disabledFrame": 3,
-				"tooltipString": "@quyen194-item-sorting:SortInventoryTooltip",
-				"onClickMessage": "PanelManager:TogglePanel:quyen194-item-sorting/ActionSortInventory"
+				"tooltipString": "@quyen19492-item-sorting:SortInventoryTooltip",
+				"onClickMessage": "PanelManager:TogglePanel:quyen19492-item-sorting/ActionSortInventory"
 			}
 		}
 	]

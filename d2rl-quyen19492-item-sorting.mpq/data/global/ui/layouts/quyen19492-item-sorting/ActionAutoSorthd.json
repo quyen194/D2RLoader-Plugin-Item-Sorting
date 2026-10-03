@@ -1,6 +1,6 @@
 {
 	"type": "Panel",
-	"name": "quyen194-item-sorting/ActionSortCube",
+	"name": "quyen19492-item-sorting/ActionAutoSort",
 	"fields": {
 		"rect": { "x": 0, "y": 0, "width": 1, "height": 1 }
 	},

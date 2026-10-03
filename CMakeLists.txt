@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.29)
-project(Quyen194ItemSorting LANGUAGES CXX)
+project(ItemSorting LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,7 +34,7 @@ FetchContent_MakeAvailable(tomlplusplus)
 # setitems}.txt; it is committed as a normal source file rather than
 # regenerated at build time, so building this plugin does not require a
 # checkout of the save-editor repo.
-add_library(Quyen194ItemSortEngine STATIC
+add_library(ItemSortEngine STATIC
 	src/sort_engine.cpp
 	src/sort_engine.hpp
 	src/item_classification.cpp
@@ -48,7 +48,7 @@ add_library(Quyen194ItemSortEngine STATIC
 	src/grid_sort.hpp
 	src/item_misc_data.hpp
 )
-target_include_directories(Quyen194ItemSortEngine PUBLIC src)
+target_include_directories(ItemSortEngine PUBLIC src)
 
 # --- Test harness (optional) -------------------------------------------------
 # tests/grid_sort_test.cpp checks the single-grid engine, its TOML reader
@@ -57,35 +57,35 @@ target_include_directories(Quyen194ItemSortEngine PUBLIC src)
 # with a plain g++/clang++ command line (see the file's header comment).
 option(QIS_BUILD_TESTS "Build tests/grid_sort_test.cpp" OFF)
 if(QIS_BUILD_TESTS)
-	add_executable(Quyen194ItemSortTests tests/grid_sort_test.cpp)
-	target_link_libraries(Quyen194ItemSortTests PRIVATE Quyen194ItemSortEngine tomlplusplus::tomlplusplus)
+	add_executable(ItemSortTests tests/grid_sort_test.cpp)
+	target_link_libraries(ItemSortTests PRIVATE ItemSortEngine tomlplusplus::tomlplusplus)
 endif()
 
 # --- Plugin DLL -------------------------------------------------------------
-add_library(Quyen194ItemSorting SHARED
+add_library(ItemSorting SHARED
 	src/plugin.cpp
 	src/plugin.rc
 	src/ui_layouts.hpp
 	src/grid_config_toml.hpp
 )
-target_link_libraries(Quyen194ItemSorting PRIVATE
+target_link_libraries(ItemSorting PRIVATE
 	D2RLPlugin::D2RLPlugin
-	Quyen194ItemSortEngine
+	ItemSortEngine
 	tomlplusplus::tomlplusplus
 )
 
 # D2RCore looks beside each plugin DLL for a companion "d2rl-<plugin-id>.mpq"
 # (see PluginSDK README "Resources and Companion MPQs"), matched by the DLL's
-# own name: "d2rl-<plugin-id>.dll". kPluginId is "quyen194-item-sorting", so
-# both must be renamed off the CMake target's default "Quyen194ItemSorting"
+# own name: "d2rl-<plugin-id>.dll". kPluginId is "quyen19492-item-sorting", so
+# both must be renamed off the CMake target's default "ItemSorting"
 # name to line up -- see the companion folder below.
-set_target_properties(Quyen194ItemSorting PROPERTIES
-	OUTPUT_NAME "d2rl-quyen194-item-sorting"
+set_target_properties(ItemSorting PROPERTIES
+	OUTPUT_NAME "d2rl-quyen19492-item-sorting"
 )
 
 d2rlplugin_embed_config(
-	TARGET Quyen194ItemSorting
-	FILE "${CMAKE_CURRENT_SOURCE_DIR}/quyen194-item-sorting.toml"
+	TARGET ItemSorting
+	FILE "${CMAKE_CURRENT_SOURCE_DIR}/quyen19492-item-sorting.toml"
 )
 
 # --- Local "ready to copy" deploy folder ------------------------------------
@@ -97,20 +97,20 @@ d2rlplugin_embed_config(
 # .github/workflows/release.yml) -- one definition of "what a deployed
 # plugin looks like", used by both local builds and CI.
 set(QIS_DEPLOY_PLUGINS_DIR "${CMAKE_SOURCE_DIR}/deploy/d2rloader/plugins")
-add_custom_command(TARGET Quyen194ItemSorting POST_BUILD
+add_custom_command(TARGET ItemSorting POST_BUILD
 	COMMAND "${CMAKE_COMMAND}" -E make_directory "${QIS_DEPLOY_PLUGINS_DIR}"
-	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:Quyen194ItemSorting>" "${QIS_DEPLOY_PLUGINS_DIR}/"
-	COMMENT "Copying $<TARGET_FILE_NAME:Quyen194ItemSorting> into deploy/d2rloader/plugins"
+	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:ItemSorting>" "${QIS_DEPLOY_PLUGINS_DIR}/"
+	COMMENT "Copying $<TARGET_FILE_NAME:ItemSorting> into deploy/d2rloader/plugins"
 	VERBATIM
 )
 
-# The default quyen194-item-sorting.toml ships beside the plugins folder, in
+# The default quyen19492-item-sorting.toml ships beside the plugins folder, in
 # deploy/d2rloader/config, so the Release zip carries an editable config too.
 set(QIS_DEPLOY_CONFIG_DIR "${CMAKE_SOURCE_DIR}/deploy/d2rloader/config")
-add_custom_command(TARGET Quyen194ItemSorting POST_BUILD
+add_custom_command(TARGET ItemSorting POST_BUILD
 	COMMAND "${CMAKE_COMMAND}" -E make_directory "${QIS_DEPLOY_CONFIG_DIR}"
-	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/quyen194-item-sorting.toml" "${QIS_DEPLOY_CONFIG_DIR}/"
-	COMMENT "Copying quyen194-item-sorting.toml into deploy/d2rloader/config"
+	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/quyen19492-item-sorting.toml" "${QIS_DEPLOY_CONFIG_DIR}/"
+	COMMENT "Copying quyen19492-item-sorting.toml into deploy/d2rloader/config"
 	VERBATIM
 )
 
@@ -118,27 +118,27 @@ add_custom_command(TARGET Quyen194ItemSorting POST_BUILD
 # deploy/, next to the d2rloader folder (packaging/README.md is the end-user
 # guide; the repo's own README.md is the developer documentation).
 set(QIS_DEPLOY_DIR "${CMAKE_SOURCE_DIR}/deploy")
-add_custom_command(TARGET Quyen194ItemSorting POST_BUILD
+add_custom_command(TARGET ItemSorting POST_BUILD
 	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/packaging/README.md" "${QIS_DEPLOY_DIR}/README.md"
 	COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/tools/patch_mod_stash_layout.py" "${QIS_DEPLOY_DIR}/patch_mod_stash_layout.py"
 	COMMENT "Copying the install README and patch_mod_stash_layout.py into deploy/"
 	VERBATIM
 )
 
-# --- Companion "d2rl-quyen194-item-sorting.mpq" resource folder --------------
+# --- Companion "d2rl-quyen19492-item-sorting.mpq" resource folder --------------
 # Dev-mode companion MPQ (README: "During development, the companion may be
 # a folder. Use a packed MPQ for release."). D2RCore finds it beside the DLL
 # by name. It holds the Action<Name>hd.json trigger-panel layouts, the
 # inventory Sort button (InventoryToolshd.json), the
-# stash button sprites (data/hd/global/ui/d2rloader/quyen194-item-sorting/
+# stash button sprites (data/hd/global/ui/d2rloader/quyen19492-item-sorting/
 # stash_btn_*.sprite, generated by tools/gen_stash_button_sprites.py) that the
 # mod's patched stash layout references (tools/patch_mod_stash_layout.py),
 # strings.json, and the table schema. copy_directory never deletes, so files
 # removed from here must also be removed from an existing deploy by hand.
-set(QIS_MPQ_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/d2rl-quyen194-item-sorting.mpq")
-add_custom_command(TARGET Quyen194ItemSorting POST_BUILD
-	COMMAND "${CMAKE_COMMAND}" -E copy_directory "${QIS_MPQ_SOURCE_DIR}" "${QIS_DEPLOY_PLUGINS_DIR}/d2rl-quyen194-item-sorting.mpq"
-	COMMENT "Copying d2rl-quyen194-item-sorting.mpq into deploy/d2rloader/plugins"
+set(QIS_MPQ_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/d2rl-quyen19492-item-sorting.mpq")
+add_custom_command(TARGET ItemSorting POST_BUILD
+	COMMAND "${CMAKE_COMMAND}" -E copy_directory "${QIS_MPQ_SOURCE_DIR}" "${QIS_DEPLOY_PLUGINS_DIR}/d2rl-quyen19492-item-sorting.mpq"
+	COMMENT "Copying d2rl-quyen19492-item-sorting.mpq into deploy/d2rloader/plugins"
 	VERBATIM
 )
 
@@ -148,11 +148,11 @@ add_custom_command(TARGET Quyen194ItemSorting POST_BUILD
 # cacheVariables entry or:
 #   cmake --preset debug -DD2RLOADER_GAME_DIR=D:/Games/DiabloII-Resurrected
 if(DEFINED D2RLOADER_GAME_DIR)
-	add_custom_command(TARGET Quyen194ItemSorting POST_BUILD
+	add_custom_command(TARGET ItemSorting POST_BUILD
 		COMMAND "${CMAKE_COMMAND}" -E make_directory "${D2RLOADER_GAME_DIR}/d2rloader/plugins"
-		COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:Quyen194ItemSorting>" "${D2RLOADER_GAME_DIR}/d2rloader/plugins/"
-		COMMAND "${CMAKE_COMMAND}" -E copy_directory "${QIS_MPQ_SOURCE_DIR}" "${D2RLOADER_GAME_DIR}/d2rloader/plugins/d2rl-quyen194-item-sorting.mpq"
-		COMMENT "Copying $<TARGET_FILE_NAME:Quyen194ItemSorting> and its companion .mpq into ${D2RLOADER_GAME_DIR}/d2rloader/plugins"
+		COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:ItemSorting>" "${D2RLOADER_GAME_DIR}/d2rloader/plugins/"
+		COMMAND "${CMAKE_COMMAND}" -E copy_directory "${QIS_MPQ_SOURCE_DIR}" "${D2RLOADER_GAME_DIR}/d2rloader/plugins/d2rl-quyen19492-item-sorting.mpq"
+		COMMENT "Copying $<TARGET_FILE_NAME:ItemSorting> and its companion .mpq into ${D2RLOADER_GAME_DIR}/d2rloader/plugins"
 		VERBATIM
 	)
 endif()

@@ -1,4 +1,4 @@
-# Builds d2rl-quyen194-item-sorting.dll (Release, x64) and publishes a GitHub
+# Builds d2rl-quyen19492-item-sorting.dll (Release, x64) and publishes a GitHub
 # Release
 # whenever a version tag is pushed, e.g.:
 #   git tag v0.1.0
@@ -21,12 +21,12 @@ jobs:
     runs-on: windows-latest
     steps:
       # Checked out as a sibling of PluginSDK below, mirroring the local
-      # D2RLoader-Plugins-Dev/{Quyen194-Item-Sorting,PluginSDK} layout that
+      # D2RLoader-Plugins-Dev/{Quyen19492-Item-Sorting,PluginSDK} layout that
       # CMakeLists.txt's `../PluginSDK` add_subdirectory() expects.
-      - name: Checkout Quyen194-Item-Sorting
+      - name: Checkout Quyen19492-Item-Sorting
         uses: actions/checkout@v4
         with:
-          path: Quyen194-Item-Sorting
+          path: Quyen19492-Item-Sorting
 
       - name: Checkout PluginSDK
         uses: actions/checkout@v4
@@ -40,36 +40,36 @@ jobs:
           arch: x64
 
       - name: Configure
-        working-directory: Quyen194-Item-Sorting
+        working-directory: Quyen19492-Item-Sorting
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        working-directory: Quyen194-Item-Sorting
+        working-directory: Quyen19492-Item-Sorting
         run: cmake --build build --config Release
 
       # CMakeLists.txt's post-build steps already filled deploy/:
-      #   d2rloader/plugins/  d2rl-quyen194-item-sorting.dll + .mpq/ folder
-      #   d2rloader/config/   quyen194-item-sorting.toml
+      #   d2rloader/plugins/  d2rl-quyen19492-item-sorting.dll + .mpq/ folder
+      #   d2rloader/config/   quyen19492-item-sorting.toml
       #   README.md           install guide (packaging/README.md)
       #   patch_mod_stash_layout.py
       # Zip deploy/'s contents as-is: the d2rloader folder goes into <game>/,
       # the README explains the rest.
       - name: Package deploy/
-        working-directory: Quyen194-Item-Sorting
+        working-directory: Quyen19492-Item-Sorting
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          $zipName = "Quyen194ItemSorting-$tag.zip"
+          $zipName = "Quyen19492ItemSorting-$tag.zip"
           foreach ($f in @("deploy/d2rloader", "deploy/README.md", "deploy/patch_mod_stash_layout.py")) {
             if (-not (Test-Path $f)) { throw "missing $f -- did the post-build copy run?" }
           }
           Compress-Archive -Path "deploy/d2rloader", "deploy/README.md", "deploy/patch_mod_stash_layout.py" -DestinationPath $zipName
-          echo "ZIP_PATH=Quyen194-Item-Sorting/$zipName" >> $env:GITHUB_ENV
+          echo "ZIP_PATH=Quyen19492-Item-Sorting/$zipName" >> $env:GITHUB_ENV
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             ${{ env.ZIP_PATH }}
-            Quyen194-Item-Sorting/packaging/README.md
+            Quyen19492-Item-Sorting/packaging/README.md
           generate_release_notes: true

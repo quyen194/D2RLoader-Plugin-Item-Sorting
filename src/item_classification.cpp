@@ -5,7 +5,7 @@
 
 #include <algorithm>
 
-namespace Quyen194ItemSorting::Classification {
+namespace ItemSorting::Classification {
 
 namespace {
 // Set by LoadFromModFolder/UseEmbeddedTable. std::nullopt means "answer from

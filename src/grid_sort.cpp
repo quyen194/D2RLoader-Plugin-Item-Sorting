@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace Quyen194ItemSorting::Grid {
+namespace ItemSorting::Grid {
 
 bool ParseFillDirection(const std::string& text, FillDirection* out) {
 	if (text == "columns") { *out = FillDirection::Columns; return true; }
