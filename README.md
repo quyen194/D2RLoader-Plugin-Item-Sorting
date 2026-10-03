@@ -1380,13 +1380,28 @@ old `Quyen194ItemSorting.dll` (or, after the later id rename,
 `<game>/d2rloader/plugins/`** so it doesn't load twice under two different
 filenames.
 
-**GitHub Releases:** `.github/workflows/release.yml` builds Release/x64 and
-publishes a GitHub Release automatically, but only when you push a version
-tag -- ordinary commits do not trigger it:
+**Version number:** the single source is `project(ItemSorting VERSION x.y.z)`
+in `CMakeLists.txt`. CMake generates `plugin_version.h` from
+`src/plugin_version.h.in`; `src/plugin.rc` turns it into the DLL's VERSIONINFO
+(Explorer > Properties > Details: product name, file/product version,
+copyright -- the strings are the `QIS_*` variables in `CMakeLists.txt`) and
+`plugin.cpp` uses it for `PluginInfo.version`. Change it with the script
+rather than by hand:
 
 ```
-git tag v0.1.0
-git push origin v0.1.0
+python tools/set_version.py              # print the current version
+python tools/set_version.py 1.2.3        # or: major | minor | patch
+python tools/set_version.py patch --tag  # also commit + create tag vX.Y.Z
+```
+
+**GitHub Releases:** `.github/workflows/release.yml` builds Release/x64 and
+publishes a GitHub Release automatically, but only when you push a version
+tag -- ordinary commits do not trigger it. The tag must equal `v` + the
+`CMakeLists.txt` version, or the workflow stops:
+
+```
+python tools/set_version.py 1.0.1 --tag
+git push origin main v1.0.1
 ```
 
 The workflow checks out this repo and

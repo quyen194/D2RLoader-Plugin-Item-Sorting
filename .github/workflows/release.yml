@@ -28,6 +28,16 @@ jobs:
         with:
           path: Quyen19492-Item-Sorting
 
+      # The DLL's embedded version comes from CMakeLists.txt's project()
+      # line (tools/set_version.py); refuse to release a tag that disagrees.
+      - name: Check tag matches project version
+        working-directory: Quyen19492-Item-Sorting
+        shell: pwsh
+        run: |
+          $version = (python tools/set_version.py).Trim()
+          $tag = "${{ github.ref_name }}"
+          if ($tag -ne "v$version") { throw "tag $tag does not match CMakeLists.txt version $version -- run tools/set_version.py" }
+
       - name: Checkout PluginSDK
         uses: actions/checkout@v4
         with:

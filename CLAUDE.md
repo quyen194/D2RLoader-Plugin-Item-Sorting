@@ -45,7 +45,8 @@ src/grid_config_toml.hpp     TOML -> Grid::Config
 src/ui_layouts.hpp           Toast widget names shared with the mpq Toasthd.json
 src/plugin.cpp               SDK entry points, service wiring, thread hops, UI listener
 d2rl-quyen19492-item-sorting.mpq/   Companion resources (layouts, sprites, strings)
-tools/                       Generators + patch_mod_stash_layout.py
+src/plugin_version.h.in      -> generated plugin_version.h (VERSIONINFO in plugin.rc + PluginInfo)
+tools/                       Generators, patch_mod_stash_layout.py, set_version.py (bump version)
 tests/grid_sort_test.cpp     Engine/config/classification tests (no SDK needed)
 packaging/README.md          End-user install guide (copied to deploy/README.md)
 ```

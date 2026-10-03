@@ -1,4 +1,42 @@
+// UTF-8 source: the copyright/company strings contain Vietnamese characters.
+#pragma code_page(65001)
+
+#include <winres.h>
+
 #include <D2RLPlugin/resource.h>
 #include <D2RLPlugin/version.h>
 
+#include "plugin_version.h"
+
 D2RL_PLUGIN_MANIFEST_RESOURCE_ID RCDATA { D2RL_PLUGIN_RESOURCE_DWORD(D2RL_PLUGIN_ABI_VERSION) }
+
+// Shown in Explorer's Properties > Details tab. All values come from the
+// generated plugin_version.h (see CMakeLists.txt / tools/set_version.py).
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION    QIS_VERSION_MAJOR, QIS_VERSION_MINOR, QIS_VERSION_PATCH, 0
+PRODUCTVERSION QIS_VERSION_MAJOR, QIS_VERSION_MINOR, QIS_VERSION_PATCH, 0
+FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+FILEFLAGS      0x0L
+FILEOS         VOS_NT_WINDOWS32
+FILETYPE       VFT_DLL
+FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+	BLOCK "StringFileInfo"
+	BEGIN
+		BLOCK "040904B0"
+		BEGIN
+			VALUE "CompanyName",      QIS_COMPANY_NAME
+			VALUE "FileDescription",  QIS_FILE_DESCRIPTION
+			VALUE "FileVersion",      QIS_VERSION_STRING
+			VALUE "InternalName",     QIS_INTERNAL_NAME
+			VALUE "LegalCopyright",   QIS_COPYRIGHT
+			VALUE "OriginalFilename", QIS_ORIGINAL_FILENAME
+			VALUE "ProductName",      QIS_PRODUCT_NAME
+			VALUE "ProductVersion",   QIS_VERSION_STRING
+		END
+	END
+	BLOCK "VarFileInfo"
+	BEGIN
+		VALUE "Translation", 0x0409, 1200
+	END
+END

@@ -21,6 +21,7 @@
 #include "grid_config_toml.hpp"
 #include "grid_sort.hpp"
 #include "item_classification.hpp"
+#include "plugin_version.h"
 #include "sort_engine.hpp"
 #include "ui_layouts.hpp"
 
@@ -47,7 +48,7 @@ constexpr PluginInfo kPluginInfo {
 	.abiVersion  = D2RL_PLUGIN_ABI_VERSION,
 	.id          = ItemSorting::UiLayouts::kPluginId,
 	.name        = "Item Sorting",
-	.version     = "0.1.0",
+	.version     = QIS_VERSION_STRING,
 	.author      = "quyen19492",
 	.description = "Auto-sorts the shared stash, personal stash, inventory and Horadric Cube.",
 	.flags       = PluginFlags::Shared,

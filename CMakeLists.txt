@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.29)
-project(ItemSorting LANGUAGES CXX)
+# Plugin version: the single source of truth for the DLL's VERSIONINFO
+# (Properties > Details) and the SDK PluginInfo.version string. Change it with
+#   python tools/set_version.py 1.2.3     (or: major | minor | patch)
+project(ItemSorting VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -65,9 +68,22 @@ endif()
 add_library(ItemSorting SHARED
 	src/plugin.cpp
 	src/plugin.rc
+	src/plugin_version.h.in
 	src/ui_layouts.hpp
 	src/grid_config_toml.hpp
 )
+# Version/product metadata -> generated plugin_version.h, included by
+# src/plugin.rc (VERSIONINFO resource) and src/plugin.cpp (PluginInfo).
+set(QIS_PRODUCT_NAME      "D2RLoader Plugin Item Sorting")
+set(QIS_FILE_DESCRIPTION  "Sort buttons for the shared stash, personal stash, inventory and Horadric Cube")
+set(QIS_COMPANY_NAME      "Aries Inc.")
+set(QIS_COPYRIGHT         "Công Quyền Knight - quyen19492@gmail.com")
+set(QIS_INTERNAL_NAME     "quyen19492-item-sorting")
+set(QIS_ORIGINAL_FILENAME "d2rl-quyen19492-item-sorting.dll")
+set(QIS_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+configure_file(src/plugin_version.h.in "${QIS_GENERATED_DIR}/plugin_version.h" @ONLY)
+target_include_directories(ItemSorting PRIVATE "${QIS_GENERATED_DIR}")
+
 target_link_libraries(ItemSorting PRIVATE
 	D2RLPlugin::D2RLPlugin
 	ItemSortEngine
