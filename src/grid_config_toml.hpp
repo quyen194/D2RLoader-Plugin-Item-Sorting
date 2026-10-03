@@ -7,7 +7,7 @@
 //
 // Semantics:
 //   - section missing entirely: Grid::DefaultConfig(section), plus a note in
-//     *warnings (an older config file predates these sections);
+//     *warnings;
 //   - key missing: that key's value from Grid::DefaultConfig(section) (the
 //     layout list included);
 //   - key present with a wrong type/value: an entry in *errors. The caller

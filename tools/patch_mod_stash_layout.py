@@ -80,17 +80,12 @@ class Strip:
     x: int                        # strip rect, in the container's coordinate space
     y: int
     buttons: list                 # (widget name, sprite, tooltip key, action panel)
-    legacy_prefixes: tuple = ()   # older marker names still recognised for upgrade/removal
     required: bool = True         # False: skip quietly if the container is missing
     must_keep: tuple = field(default_factory=tuple)  # native widgets that must survive the edit
 
     @property
     def marker(self) -> str:
         return f"{self.marker_prefix}{self.version}"
-
-    @property
-    def all_prefixes(self) -> tuple:
-        return (self.marker_prefix,) + self.legacy_prefixes
 
     @property
     def rect(self):
@@ -102,17 +97,11 @@ class Strip:
 # of the native page navigation (StashNavigation sits at x=668..1088,
 # y=1506..1599; the 16x13 grid starts at x=90 and ends above y=1506),
 # vertically centred on it. Coordinates are BankExpansionLayout-local, same
-# space as StashNavigation. Strips written before the plugin was renamed from
-# remote-stash-sorting (strip v1/v2) or while it was still called
-# quyen194-item-sorting (Quyen194ItemSorting* markers, which point at the old
-# panel / sprite / string ids) are still recognised so they get upgraded or
-# removed instead of being left behind. Versions were bumped with the
-# quyen19492 rename so every old strip counts as outdated.
+# space as StashNavigation.
 SHARED_STRIP = Strip(
     key="shared-stash",
     marker_prefix="Quyen19492ItemSortingStashButtons_v",
     version=5,
-    legacy_prefixes=("Remote" + "StashSortingStashButtons_v", "Quyen194" + "ItemSortingStashButtons_v"),
     container="SharedStashTabContainer",
     position="first",
     x=110,
@@ -130,14 +119,12 @@ SHARED_STRIP = Strip(
 # SharedStashTabContainer, which therefore draws on top of it. basicstash_
 # container is visible on both the Personal and the Shared tab and D2R has no
 # Personal-only container, so this is how the button disappears on the Shared
-# tab (covered by Auto Sort). v1 sat right of the shared strip (x=398) as the
-# last child and stayed visible on the Shared tab. If one click ever reaches
+# tab (covered by Auto Sort). If one click ever reaches
 # both buttons, the plugin drops the personal sort (see DoSortGrid).
 PERSONAL_STRIP = Strip(
     key="personal-stash",
     marker_prefix="Quyen19492ItemSortingPersonalButtons_v",
     version=3,
-    legacy_prefixes=("Quyen194" + "ItemSortingPersonalButtons_v",),
     container="basicstash_container",
     position="first",
     x=SHARED_STRIP.x,
@@ -152,7 +139,6 @@ CUBE_TAB_STRIP = Strip(
     key="stash-cube-tab",
     marker_prefix="Quyen19492ItemSortingCubeTabButtons_v",
     version=2,
-    legacy_prefixes=("Quyen194" + "ItemSortingCubeTabButtons_v",),
     container="advancedstash_horadriccube",
     position="last",
     x=284,
@@ -168,7 +154,6 @@ CUBE_PANEL_STRIP = Strip(
     key="cube-panel",
     marker_prefix="Quyen19492ItemSortingCubeButtons_v",
     version=2,
-    legacy_prefixes=("Quyen194" + "ItemSortingCubeButtons_v",),
     container="HoradricCubeLayout",
     position="last",
     x=120,
@@ -275,8 +260,7 @@ def enclosing_object_start(text: str, pos: int) -> int:
 
 
 def find_existing_strip(text: str, strip: Strip):
-    alternatives = "|".join(re.escape(p) for p in strip.all_prefixes)
-    m = re.search(r'"name"\s*:\s*"(?:' + alternatives + r')(\d+)"', text)
+    m = re.search(r'"name"\s*:\s*"' + re.escape(strip.marker_prefix) + r'(\d+)"', text)
     if not m:
         return None
     start = enclosing_object_start(text, m.start())
@@ -403,9 +387,9 @@ def validate(text: str, strip: Strip, expect_patched: bool) -> None:
     names = [c.get("name") for c in container.get("children", [])]
     if expect_patched and strip.marker not in names:
         raise ValueError(f"validation: {strip.key} strip did not land inside {strip.container}")
-    if any(str(n).startswith(strip.all_prefixes) and n != strip.marker for n in names):
+    if any(str(n).startswith(strip.marker_prefix) and n != strip.marker for n in names):
         raise ValueError(f"validation: an older {strip.key} strip is still present")
-    if not expect_patched and any(str(n).startswith(strip.all_prefixes) for n in names):
+    if not expect_patched and any(str(n).startswith(strip.marker_prefix) for n in names):
         raise ValueError(f"validation: {strip.key} strip still present after removal")
     for native in strip.must_keep:
         if find_widget(doc, native) is None:

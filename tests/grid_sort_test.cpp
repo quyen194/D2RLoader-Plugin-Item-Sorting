@@ -204,7 +204,7 @@ static void TestShippedConfig() {
 	}
 
 	// Plugin-wide block holds only plugin-wide keys; the shared stash has its
-	// own section (plugin.cpp's LoadConfig warns about the legacy locations).
+	// own section.
 	{
 		const auto* top = root["item-sorting"].as_table();
 		CHECK(top != nullptr, "[item-sorting] exists");

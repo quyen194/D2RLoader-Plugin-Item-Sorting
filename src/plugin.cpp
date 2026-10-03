@@ -317,34 +317,11 @@ Config LoadConfig(const PluginContext* ctx) {
 	cfg.inventory     = ItemSorting::Grid::ParseGridSection(parsed, "inventory");
 	cfg.cube          = ItemSorting::Grid::ParseGridSection(parsed, "cube");
 
-	// The sections were called [quyen194-item-sorting...] (the plugin's id at
-	// the time) before; an old file would otherwise silently run on built-in
-	// defaults.
-	if (parsed["quyen194-item-sorting"] && !parsed["item-sorting"]) {
-		ctx->LogWarn(
-			"[config] the config file still uses the old [quyen194-item-sorting...] section names and is ignored -- rename them to "
-			"[item-sorting], [item-sorting.shared_stash], ... (see the shipped quyen19492-item-sorting.toml). Using built-in defaults.");
-	}
-
 	// [item-sorting]: plugin-wide settings only.
 	auto section = parsed["item-sorting"];
 	cfg.enabled            = section["enabled"].value_or(true);
 	cfg.debugLogUiMessages = section["debug_log_ui_messages"].value_or(false);
 	cfg.notificationEnabled = section["notification_enabled"].value_or(true);
-
-	// Keys that used to live directly under [item-sorting] before the
-	// shared stash got its own section. An older config file would otherwise
-	// silently run on defaults, so say so.
-	for (const char* legacy : { "shared_stash_tab_count", "start_tab", "blank_tabs_at_start", "compact_empty_tabs_first", "add_empty_page_when",
-			 "add_page_enabled", "remove_page_enabled", "grid", "layout" }) {
-		if (section[legacy]) {
-			ctx->LogWarn((std::string("[config] '") + legacy
-						  + "' directly under [item-sorting] is ignored -- shared-stash settings now live in "
-							"[item-sorting.shared_stash] (grid.width/height became grid_width/grid_height, [[layout]] became "
-							"[[item-sorting.shared_stash.layout]]).")
-							 .c_str());
-		}
-	}
 
 	// [item-sorting.shared_stash]
 	auto shared = section["shared_stash"];
