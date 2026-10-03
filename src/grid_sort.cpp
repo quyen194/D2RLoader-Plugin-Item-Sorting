@@ -630,7 +630,7 @@ Plan PlanSort(const std::vector<ItemFacts>& items, const Config& cfg) {
 			if (outsideLogged++ < 8) {
 				char buf[200];
 				std::snprintf(buf, sizeof(buf), "[%s] item code 0x%08X at (%d,%d) size %dx%d is outside the %ux%u grid -- left untouched", cfg.name.c_str(),
-					it.code, it.x, it.y, iw, ih, cfg.width, cfg.height);
+					it.code, it.x + 1, it.y + 1, iw, ih, cfg.width, cfg.height);
 				plan.log.push_back(buf);
 			}
 			continue;

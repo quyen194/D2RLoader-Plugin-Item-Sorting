@@ -963,7 +963,7 @@ SortOutcome RunAutoSort(
 			if (span == 0) {
 				line += "no tabs available";
 			} else {
-				line += "tabs [" + std::to_string(cursor) + ".." + std::to_string(cursor + span - 1) + "] (" + std::to_string(reserved)
+				line += "pages [" + PageText(cursor) + ".." + PageText(cursor + span - 1) + "] (" + std::to_string(reserved)
 				     + " reserved + " + std::to_string(borrowed) + " borrowed)";
 			}
 			line += ", " + std::to_string(attempt.moves.size()) + " item(s) placed";
@@ -1084,7 +1084,7 @@ std::vector<std::string> DetectCollisions(
 		const PlannedMove& mv = entry.second;
 		const auto found = byHandle.find(mv.handle);
 		if (found == byHandle.end()) {
-			out.push_back("move for unknown handle " + std::to_string(mv.handle) + " -> tab " + std::to_string(mv.destTab));
+			out.push_back("move for unknown handle " + std::to_string(mv.handle) + " -> page " + PageText(mv.destTab));
 			continue;
 		}
 		const ItemFacts& fact = *found->second;
@@ -1094,8 +1094,7 @@ std::vector<std::string> DetectCollisions(
 			std::snprintf(codeHex, sizeof(codeHex), "%08X", fact.code);
 			out.push_back(
 				std::string("COLLISION: item code 0x") + codeHex + " (" + std::to_string(fact.w) + "x" + std::to_string(fact.h)
-				+ ") -> tab " + std::to_string(mv.destTab) + " @ (" + std::to_string(mv.destX) + "," + std::to_string(mv.destY)
-				+ ") is already occupied");
+				+ ") -> page " + PageText(mv.destTab) + " @ " + CellText(mv.destX, mv.destY) + " is already occupied");
 			if (out.size() >= 20) break;
 			continue;
 		}
@@ -1251,8 +1250,8 @@ SequencedMoves SequenceMovesForLiveApply(
 			auto occNode = nodes.find(occ);
 			if (occNode == nodes.end()) {
 				result.diagnostics.push_back(
-					"move for handle " + std::to_string(h) + " -> tab " + std::to_string(n.mv.destTab) + " ("
-					+ std::to_string(n.mv.destX) + "," + std::to_string(n.mv.destY) + ") is currently occupied by handle "
+					"move for handle " + std::to_string(h) + " -> page " + PageText(n.mv.destTab) + " "
+					+ CellText(n.mv.destX, n.mv.destY) + " is currently occupied by handle "
 					+ std::to_string(occ) + ", which this plan never moves -- this move may still be rejected live");
 				continue;
 			}

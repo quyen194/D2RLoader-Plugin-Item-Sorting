@@ -32,6 +32,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -641,7 +642,7 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 			if (!tabList.empty()) {
 				tabList += ",";
 			}
-			tabList += std::to_string(tabs[i]);
+			tabList += ItemSorting::PageText(tabs[i]);
 		}
 		if (tabs.size() > 40) {
 			tabList += ",...";
@@ -651,8 +652,8 @@ auto CollectSharedStash(const PluginContext* ctx, PlayerHandle player, EnumState
 		std::snprintf(
 			buf,
 			sizeof(buf),
-			"[remote-stash] shared-stash scan: %zu item(s) across %zu distinct tab number(s) [%s]. If this "
-			"stays the SAME single tab number no matter which tab is open in-game when you click a button, "
+			"[remote-stash] shared-stash scan: %zu item(s) across %zu distinct page(s) [%s] (1-based, as shown in-game). If this "
+			"stays the SAME single page no matter which page is open in-game when you click a button, "
 			"forEachInventoryItem is only returning the currently open tab, not every tab (see README Known gaps #8).",
 			state->facts.size(),
 			tabs.size(),
@@ -762,6 +763,11 @@ auto ApplyMoves(
 	uint32_t      totalCommitted = 0;
 	Items::Result worstResult    = Items::Result::Success; // first non-Success result seen, if any
 
+	// Rejected-move counts per source / destination page, for the one-line
+	// summary after all layers ran.
+	std::map<uint32_t, uint32_t> rejectedBySourcePage;
+	std::map<uint32_t, uint32_t> rejectedByDestPage;
+
 	// A single call to executeExistingItemTransaction is all-or-nothing (see
 	// ExistingItemTransactionResult's own doc comment: "committedOperationCount
 	// is zero on failure") -- so one operation this API rejects (e.g. an item
@@ -819,10 +825,18 @@ auto ApplyMoves(
 			// README "Known gaps" #3.
 			std::string category = "?";
 			std::string codeText;
+			// Where the item sat when the plan was made (the scan), so a cluster
+			// of rejections can be tied to a source page, not just a destination.
+			std::string sizeText   = "?";
+			std::string sourceText = "page ? (?,?)";
+			uint32_t    sourcePage = ItemSorting::kUnknownTab;
 			auto        factIt = factsByHandle.find(static_cast<uint64_t>(op.item));
 			if (factIt != factsByHandle.end()) {
 				const auto* fact = factIt->second;
 				codeText          = UnpackItemCode(fact->code);
+				sourcePage        = fact->sharedStashPage;
+				sizeText          = std::to_string(fact->w) + "x" + std::to_string(fact->h);
+				sourceText        = "page " + ItemSorting::PageText(fact->sharedStashPage) + " " + ItemSorting::CellText(fact->x, fact->y);
 				if (fact->isGear) {
 					category = "gear(slot=" + std::to_string(static_cast<int>(fact->gearSlot)) + ")";
 				} else {
@@ -845,13 +859,19 @@ auto ApplyMoves(
 			// to be re-derived from which tabs the rest of the plan touches.
 			const bool isScratch = begin < sequenced.isScratchMove.size() && sequenced.isScratchMove[begin];
 
-			char msg[512];
+			++rejectedBySourcePage[sourcePage];
+			++rejectedByDestPage[op.move.destination.sharedStashPage];
+
+			const std::string destText = "page " + ItemSorting::PageText(op.move.destination.sharedStashPage) + " "
+			                           + ItemSorting::CellText(op.move.destination.x, op.move.destination.y);
+
+			char msg[640];
 			std::snprintf(
 				msg, sizeof(msg),
-				"[remote-stash] move for item handle %llu (code='%s', %s) -> tab %u (%u,%u) was rejected (result "
+				"[remote-stash] move for item handle %llu (code='%s', %s, size %s) scanned at %s -> %s was rejected (result "
 				"%u); skipping just this item, the rest of the plan is unaffected.%s",
-				static_cast<unsigned long long>(op.item), codeText.c_str(), category.c_str(), op.move.destination.sharedStashPage,
-				op.move.destination.x, op.move.destination.y, static_cast<unsigned>(txnResult),
+				static_cast<unsigned long long>(op.item), codeText.c_str(), category.c_str(), sizeText.c_str(), sourceText.c_str(), destText.c_str(),
+				static_cast<unsigned>(txnResult),
 				isScratch ? " [this was a temporary scratch-cell parking move to break a dependency cycle, not the item's real "
 							"destination -- see README Known gaps #3/#8]"
 						  : "");
@@ -881,6 +901,23 @@ auto ApplyMoves(
 			offset += chunkSize;
 		}
 		layerOffset = layerEnd;
+	}
+
+	if (!rejectedBySourcePage.empty()) {
+		auto pageCounts = [](const std::map<uint32_t, uint32_t>& counts) {
+			std::string text;
+			for (const auto& [page, count] : counts) {
+				if (!text.empty()) text += ", ";
+				text += "page " + ItemSorting::PageText(page) + ": " + std::to_string(count);
+			}
+			return text;
+		};
+		uint32_t rejectedTotal = 0;
+		for (const auto& entry : rejectedBySourcePage) rejectedTotal += entry.second;
+		const std::string msg = "[remote-stash] " + std::to_string(rejectedTotal) + " rejected move(s) by SOURCE page (where the item was): ["
+		                      + pageCounts(rejectedBySourcePage) + "]; by DESTINATION page: [" + pageCounts(rejectedByDestPage)
+		                      + "]. Pages and cells are 1-based, as shown in-game.";
+		ctx->LogWarn(msg.c_str());
 	}
 
 	if (committedCount != nullptr) {
@@ -1316,20 +1353,23 @@ auto ApplyGridMoves(
 			continue;
 		}
 
-		std::string code = "?";
-		std::string size = "?";
+		std::string code   = "?";
+		std::string size   = "?";
+		std::string source = "(?,?)";
 		for (const auto& it : items) {
 			if (it.handle == mv.handle) {
-				code = UnpackItemCode(it.code);
-				size = std::to_string(it.w) + "x" + std::to_string(it.h);
+				code   = UnpackItemCode(it.code);
+				size   = std::to_string(it.w) + "x" + std::to_string(it.h);
+				source = ItemSorting::CellText(it.x, it.y);
 				break;
 			}
 		}
 		char msg[400];
 		std::snprintf(msg, sizeof(msg),
-			"%sthe game rejected step %zu/%zu (result %u): item '%s' (%s) -> (%d,%d). Stopped here; the %zu "
+			"%sthe game rejected step %zu/%zu (result %u): item '%s' (%s, scanned at %s) -> %s (cells 1-based). Stopped here; the %zu "
 			"earlier step(s) stay applied, nothing is lost.",
-			LogTagFor(container), i + 1, steps.size(), static_cast<unsigned>(txnResult), code.c_str(), size.c_str(), mv.destX, mv.destY, i);
+			LogTagFor(container), i + 1, steps.size(), static_cast<unsigned>(txnResult), code.c_str(), size.c_str(), source.c_str(),
+			ItemSorting::CellText(mv.destX, mv.destY).c_str(), i);
 		ctx->LogWarn(msg);
 		return txnResult;
 	}
@@ -1441,7 +1481,7 @@ void __cdecl DoSortGrid(const PluginContext* ctx, void* userData) noexcept {
 		std::string pages;
 		for (const auto& [page, count] : state.itemsByInventoryPage) {
 			if (!pages.empty()) pages += ", ";
-			pages += "page " + std::to_string(page) + ": " + std::to_string(count);
+			pages += "raw inventoryPage id " + std::to_string(page) + ": " + std::to_string(count);
 		}
 		char buf[512];
 		std::snprintf(buf, sizeof(buf),

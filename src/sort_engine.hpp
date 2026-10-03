@@ -29,6 +29,16 @@ namespace ItemSorting {
 
 inline constexpr uint32_t kUnknownTab = (std::numeric_limits<uint32_t>::max)();
 
+// Log text only. The engine and the SDK count tabs and cells from 0; every
+// log line shows them 1-based so they match the in-game "Page N / 200" label
+// and what a player counts by eye.
+inline std::string PageText(uint32_t tab) {
+	return tab == kUnknownTab ? std::string("?") : std::to_string(static_cast<uint64_t>(tab) + 1);
+}
+inline std::string CellText(int64_t x, int64_t y) {
+	return "(" + std::to_string(x + 1) + "," + std::to_string(y + 1) + ")";
+}
+
 enum class GearSlot : uint8_t {
 	None = 0,
 	Helm, Torso, Belt, Gloves, Boots, Shield,

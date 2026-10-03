@@ -170,6 +170,17 @@ Page, on-screen page tracking), `[personal-stash]`, `[inventory]`, `[cube]`,
 service checks, the `debug_log_ui_messages` firehose). `LogTagFor()` in
 `plugin.cpp` maps a container to its tag.
 
+Shared-stash pages and grid cells are **1-based in every log line** (page 1
+is the first page, matching the in-game "Page N / 200" label; cell (1,1) is
+the top-left), even though the SDK and the engine count both from 0. Use
+`ItemSorting::PageText` / `CellText` (`sort_engine.hpp`) for any new log
+text. The one exception is the single-grid scan's "raw inventoryPage id",
+which is the game's internal page id, not a page a player counts.
+
+A rejected shared-stash move logs the item's code, category, size, where the
+scan found it and where the plan sent it; after the run, one summary line
+counts the rejections per source page and per destination page.
+
 ## Config (`quyen19492-item-sorting.toml`)
 
 D2RLoader creates `<scope>/d2rloader/config/quyen19492-item-sorting.toml` from
@@ -1113,7 +1124,17 @@ here for review, same as the algorithm-level scope note below.
     runes, quest items, and potions are the only things the
     "unclassified" catch-all category ever sends to those tabs, and are
     the only items rejected in either live run so far -- pending direct
-    confirmation from an enhanced rejection log added this session. It's
+    confirmation from an enhanced rejection log added this session.
+    **That hypothesis is now ruled out:** the next run (log lines with item
+    codes) rejected plain gear (`ka3`, `xa1`, `ua2`, ...) too, still all
+    `Unsupported`, still all bound for 0-based tabs 78/79 (in-game pages 79
+    and 80). Yet screenshots of those two pages show one item from each
+    destination group did land there (Heavy Bracers at page 79 cell (1,1),
+    Ral at page 80 cell (7,2)), so the destination pages accept moves; the
+    rejections look tied to the items or where they came from (their
+    handles are one contiguous run, 345-417). The rejection log now also
+    prints each item's scanned source page/cell and size, plus a per-source-
+    page summary, to settle this on the next run. It's
     still a good demonstration of this item's fix working exactly as
     intended even for a failure it wasn't built for: the 73 bad operations
     were isolated and individually logged, and every other operation in
